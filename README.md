@@ -57,7 +57,7 @@ You pick two. You design mitigation for the third.
 
 **Option B — High quality + Low cost:** Use a smaller model with heavy RAG augmentation. Quality stays high because retrieval grounds the answers, but latency suffers — embedding + vector search + reranking + generation can push past 3–4 seconds.
 
-**Option C — Low latency + Low cost:** Use a tiny model with minimal context. Responses are fast and cheap, but quality drops — the model lacks the reasoning depth for nuanced recommendations.
+**Option C — Low latency + Low cost:** Use a tiny model with minimal context. Responses are fast and cheap, but quality drops, the model lacks the reasoning depth for nuanced recommendations.
 
 ### Our choice: Quality + Cost, with latency mitigation
 
@@ -65,10 +65,10 @@ We sacrifice raw latency slightly in exchange for keeping costs under control an
 
 **The math:**
 - 200 requests/hr × 24hr = 4,800 requests/day
-- 80% on small model (e.g., via Bedrock or self-hosted): ~$0.002/request → $9.60/day
-- 20% on GPT-4o: ~$0.03/request → $28.80/day
-- Total LLM cost: ~$38.40/day → **~$1,150/month**
-- Compare to 100% GPT-4o: ~$0.03 × 4,800 = $144/day → **~$4,320/month**
+- 80% on small model (e.g., via Bedrock or self-hosted): approx $0.002/request → $9.60/day
+- 20% on GPT-4o: approx $0.03/request → $28.80/day
+- Total LLM cost: approx $38.40/day → **approx $1,150/month**
+- Compare to 100% GPT-4o: $0.03 × 4,800 = $144/day → **approx $4,320/month**
 
 The routing layer adds ~50ms of overhead but saves ~$3,000/month. That's the trade-off, justified with numbers.
 
@@ -117,7 +117,7 @@ The routing layer adds ~50ms of overhead but saves ~$3,000/month. That's the tra
                └──────────────────────────────────┘
 ```
 
-**Single agent, not three.** The orchestrator uses tool-calling to decide which path to take. A user message like "find me something like this" + an image triggers the image search tool. "Recommend a running shirt" triggers text search. "What can you do?" triggers no tool — the LLM responds directly. This is cleaner than a separate intent classifier because the LLM handles ambiguous and multi-intent queries natively.
+**Single agent, not three.** The orchestrator uses tool-calling to decide which path to take. A user message like "find me something like this" + an image triggers the image search tool. "Recommend a running shirt" triggers text search. "What can you do?" triggers no tool, the LLM responds directly. This is cleaner than a separate intent classifier because the LLM handles ambiguous and multi-intent queries natively.
 
 ---
 
@@ -140,11 +140,11 @@ The routing layer adds ~50ms of overhead but saves ~$3,000/month. That's the tra
 - **Simple pricing** — predictable costs at moderate scale ($70–200/month for our catalog size).
 - **Metadata filtering** — supports filtering by category, price range, etc. alongside vector search, which is critical for commerce ("running shoes under $100").
 
-**Trade-off acknowledged:** Pinecone gives you less infrastructure control than Weaviate self-hosted. At scale (100M+ vectors), it becomes expensive — Milvus or self-hosted Weaviate would be cheaper. But at our catalog size (hundreds to thousands of products), the operational simplicity outweighs the cost premium.
+**Trade-off acknowledged:** Pinecone gives you less infrastructure control than Weaviate self-hosted. At scale (100M+ vectors), it becomes expensive. Milvus or self-hosted Weaviate would be cheaper. But at our catalog size (hundreds to thousands of products), the operational simplicity outweighs the cost premium.
 
 **What about Weaviate?** Better choice if you need hybrid search (vector + BM25 keyword) built-in, or if you have a DevOps team and want to self-host for cost control. For this project, Pinecone's managed approach wins because we're optimizing for development speed, not infrastructure savings.
 
-**Migration path:** Start with Pinecone. If costs become prohibitive at scale, migrate to Weaviate self-hosted. The vector store is the easiest component to swap — the embedding model and retrieval logic stay the same; you only change the client library.
+**Migration path:** Start with Pinecone. If costs become prohibitive at scale, migrate to Weaviate self-hosted. The vector store is the easiest component to swap, the embedding model and retrieval logic stay the same; you only change the client library.
 
 ---
 
@@ -156,12 +156,12 @@ The routing layer adds ~50ms of overhead but saves ~$3,000/month. That's the tra
 
 Product catalogs are inherently **relational and structured**. A product has a fixed schema: name, price, SKU, category, brand, dimensions, inventory count. These fields don't change shape per-document. You need:
 
-- **ACID transactions** — when inventory updates, price changes, or order processing happens, you need guarantees. Postgres gives you this natively. MongoDB's transactions exist but are bolt-on and come with performance caveats.
-- **Complex queries** — "Show me all products in category X, priced between $20–$50, in stock, sorted by rating" is a single SQL query with proper indexes. In MongoDB, this requires compound indexes that are less intuitive to optimize.
-- **Joins** — products relate to categories, brands, reviews, inventory records. Postgres handles relational joins efficiently. MongoDB forces you to either denormalize (duplicating data) or use `$lookup` (which is slow).
-- **pgvector extension** — if you ever want to consolidate vector search into the same database, Postgres supports it. This would eliminate Pinecone entirely for simpler deployments. MongoDB has `$vectorSearch` via Atlas, but it's less mature and locks you into MongoDB Atlas.
+- **ACID transactions**: when inventory updates, price changes, or order processing happens, you need guarantees. Postgres gives you this natively. MongoDB's transactions exist but are bolt-on and come with performance caveats.
+- **Complex queries**: "Show me all products in category X, priced between $20–$50, in stock, sorted by rating" is a single SQL query with proper indexes. In MongoDB, this requires compound indexes that are less intuitive to optimize.
+- **Joins**: products relate to categories, brands, reviews, inventory records. Postgres handles relational joins efficiently. MongoDB forces you to either denormalize (duplicating data) or use `$lookup` (which is slow).
+- **pgvector extension**: if you ever want to consolidate vector search into the same database, Postgres supports it. This would eliminate Pinecone entirely for simpler deployments. MongoDB has `$vectorSearch` via Atlas, but it's less mature and locks you into MongoDB Atlas.
 
-**"Isn't MongoDB better aligned with LLMs?"** — This is a common misconception. The argument is that LLMs output JSON, and MongoDB stores JSON, so they're "aligned." But the alignment that matters is between your *data model* and your *database*, not between your LLM output format and your database. LLMs can output any format you ask for. Postgres with JSONB columns gives you the best of both: structured relational data with the flexibility to store unstructured metadata (like varying product attributes) in JSONB fields when needed.
+**"Isn't MongoDB better aligned with LLMs?"**: This is a common misconception. The argument is that LLMs output JSON, and MongoDB stores JSON, so they're "aligned." But the alignment that matters is between your *data model* and your *database*, not between your LLM output format and your database. LLMs can output any format you ask for. Postgres with JSONB columns gives you the best of both: structured relational data with the flexibility to store unstructured metadata (like varying product attributes) in JSONB fields when needed.
 
 **When MongoDB would be the right choice:** If your product catalog had highly variable schemas (every product has completely different attributes with no shared structure), or if you were building a content management system where documents are the natural unit. For a commerce catalog, that's not the case.
 
@@ -173,7 +173,7 @@ Product catalogs are inherently **relational and structured**. A product has a f
 
 **Trade-off:** CLIP's text understanding is shallower than dedicated text embedding models (like OpenAI `text-embedding-3-large` or Cohere Embed). For pure text search, a dedicated text model would give ~10–15% better retrieval accuracy. The mitigation: we use metadata filtering (category, price range extracted by the LLM) alongside CLIP vector search, which compensates for the weaker text semantics.
 
-**Alternative considered:** Use two separate models — `text-embedding-3-large` for text queries and CLIP for image queries, with two separate Pinecone indexes. This gives better text retrieval but doubles the index cost and adds routing complexity. For a commerce agent where image search is a primary feature, the unified CLIP approach is the pragmatic choice.
+**Alternative considered:** Use two separate models, `text-embedding-3-large` for text queries and CLIP for image queries, with two separate Pinecone indexes. This gives better text retrieval but doubles the index cost and adds routing complexity. For a commerce agent where image search is a primary feature, the unified CLIP approach is the pragmatic choice.
 
 **Model variant:** `openai/clip-vit-base-patch32` for prototyping (fast, small). For production, consider `clip-vit-large-patch14` or OpenCLIP `ViT-bigG-14` for better accuracy at the cost of larger embeddings (more Pinecone storage).
 
