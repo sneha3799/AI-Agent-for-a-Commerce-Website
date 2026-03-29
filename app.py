@@ -7,6 +7,10 @@ from dotenv import load_dotenv
 # For structured output combined with typing 
 from pydantic import BaseModel, Field 
 
+import open_clip
+import torch
+from PIL import Image
+
 # Flask : the application
 # render_template : renders HTML docs
 # redirect : reroutes to another route
@@ -14,15 +18,20 @@ from pydantic import BaseModel, Field
 # flash : flashes messages when something suceeds or fails
 # request: handles details of the request
 from flask import Flask, render_template, redirect, url_for, flash, request
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+# from mcp import ClientSession, StdioServerParameters
+# from mcp.client.stdio import stdio_client
 
 from langchain_openai import ChatOpenAI
-from langchain_mcp_adapters.tools import load_mcp_tools
+# from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.prebuilt import create_react_agent
 
 load_dotenv()
-model = ChatOpenAI(model='gpt-4o')
+# llm = ChatOpenAI(model='gpt-4o')
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
+tokenizer = open_clip.get_tokenizer('ViT-B-32')
+model.to(device)
 
 # server_params = StdioServerParameters(
 #     command='npx',
@@ -63,27 +72,74 @@ app.secret_key = 'secretkey-not-for-prod'
 
 # LangGraph ReAct agent
 # asynchronous function for running the agent
-async def run_agent(query, platforms):
-    # connect to MCP server
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as sess:
-            await sess.initialize()
+# async def run_agent(query, platforms):
+#     # connect to MCP server
+#     async with stdio_client(server_params) as (read, write):
+#         async with ClientSession(read, write) as sess:
+#             await sess.initialize()
 
-            tools = await load_mcp_tools(sess)
-            agent = create_react_agent(model, tools, response_format=ProductSearchResponse)
+#             tools = await load_mcp_tools(sess)
+#             agent = create_react_agent(model, tools, response_format=ProductSearchResponse)
 
-            prompt = f'{query}\n\nPlatforms: {",".join(platforms)}'
-            result = await agent.invoke(
-                {
-                    'messages': [
-                        {'role': 'system', 'content': SYSTEM_PROMPT},
-                        {'role': 'user', 'content': prompt}
-                    ]
-                }
-            )
-            structured = result['structured_response']
-            return structured.model_dump()
+#             prompt = f'{query}\n\nPlatforms: {",".join(platforms)}'
+#             result = await agent.invoke(
+#                 {
+#                     'messages': [
+#                         {'role': 'system', 'content': SYSTEM_PROMPT},
+#                         {'role': 'user', 'content': prompt}
+#                     ]
+#                 }
+#             )
+#             structured = result['structured_response']
+#             return structured.model_dump()
         
+# @app.route("/chat", methods=['GET', 'POST'])
+# def chat():
+#     if request.method=="POST":
+#         query = request.form.get("query", "").strip()
+#         image = request.form.getlist("image")
+
+#         if not query:
+#             flash("Please enter a search query", "danger")
+#             return redirect(url_for("index"))
+
+#         # if not platforms:
+#         #     flash("Select atleast one platform", "danger")
+#         #     return redirect(url_for("index"))
+        
+#         try:
+#             response_json = asyncio.run(run_agent(query, image))
+#         except Exception as exc:
+#             flash(f"Agent error: {exc}", "danger")
+#             return redirect(url_for("index"))
+        
+#         return render_template(
+#             "index.html",
+#             query= query, 
+#             image = image,
+#             response = response_json
+#         )
+    
+#     return render_template(
+#         "index.html",
+#         query= "", 
+#         image = None,
+#         response = None
+#     )
+
+def generate_embeddings(input, is_image=False):
+    if is_image:
+        image = Image.open(input).convert("RGB")
+        image_input = preprocess(image).unsqueeze(0).to(device)
+        with torch.no_grad():
+            embedding = model.encode_image(image_input)
+    else:
+        text_input = tokenizer([input]).to(device)
+        with torch.no_grad():
+            embedding = model.encode_text(text_input)
+    embedding /= embedding.norm(dim=-1, keepdim=True)
+    return embedding.squeeze(0).cpu().numpy().tolist()
+ 
 @app.route("/", methods=['GET', 'POST'])
 def index():
     if request.method=="POST":

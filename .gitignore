@@ -10,3 +10,6 @@ wheels/
 .venv
 
 .env
+static/images/
+myntradataset/
+.DS_Store
