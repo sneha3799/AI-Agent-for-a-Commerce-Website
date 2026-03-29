@@ -24,39 +24,39 @@ from langgraph.prebuilt import create_react_agent
 load_dotenv()
 model = ChatOpenAI(model='gpt-4o')
 
-server_params = StdioServerParameters(
-    command='npx',
-    args=['@brightdata/mcp'],
-    env={
-        'API_TOKEN': os.getenv('API_TOKEN'),
-        'WEB_UNLOCKER_ZONE': os.getenv('WEB_UNLOCKER_ZONE'),
-        'BROWSER_AUTH': os.getenv('BROWSER_AUTH')
-    }
-)
+# server_params = StdioServerParameters(
+#     command='npx',
+#     args=['@brightdata/mcp'],
+#     env={
+#         'API_TOKEN': os.getenv('API_TOKEN'),
+#         'WEB_UNLOCKER_ZONE': os.getenv('WEB_UNLOCKER_ZONE'),
+#         'BROWSER_AUTH': os.getenv('BROWSER_AUTH')
+#     }
+# )
 
 SYSTEM_PROMPT = (
     "To find products, first use the search_engine tool. When finding products, use the web_data tool for the platform. If none exists, scrape as markdown."
     "Example: Don't use web_data_bestbuy_products for search. Use it only for getting data on specific products you already found in search."
 )
 
-PLATFORMS = ['Amazon', 'Best Buy', 'Ebay', 'Walmart', 'Target', 'Costco', 'Newegg']
+# PLATFORMS = ['Amazon', 'Best Buy', 'Ebay', 'Walmart', 'Target', 'Costco', 'Newegg']
 
 # Defining data model using classes as we expect LLM output to have a certain structure
 
 # For product hit
-class Hit(BaseModel):
-    url: str = Field(..., 'The URL of the product that was found')
-    title: str = Field(..., 'The title of the product that was found')
-    rating: str = Field(..., 'The rating of the product (stars, number of ratings given etc.)')
+# class Hit(BaseModel):
+#     url: str = Field(..., 'The URL of the product that was found')
+#     title: str = Field(..., 'The title of the product that was found')
+#     rating: str = Field(..., 'The rating of the product (stars, number of ratings given etc.)')
 
-# For each platform
-class PlatformBlock(BaseModel):
-    platform: str = Field(..., description='Name of the platform')
-    results: list[Hit] = Field(..., description='List of results for this platform')
+# # For each platform
+# class PlatformBlock(BaseModel):
+#     platform: str = Field(..., description='Name of the platform')
+#     results: list[Hit] = Field(..., description='List of results for this platform')
 
-# Response object
-class ProductSearchResponse(BaseModel):
-    platforms: list[PlatformBlock] = Field(..., description='Aggregated list of all results grouped by platform')
+# # Response object
+# class ProductSearchResponse(BaseModel):
+#     platforms: list[PlatformBlock] = Field(..., description='Aggregated list of all results grouped by platform')
 
 app = Flask(__name__)
 app.secret_key = 'secretkey-not-for-prod'
