@@ -1,10 +1,29 @@
 import os
+import re
 import json
 import asyncio
 import psycopg2
 import base64
 import markdown
 from typing import List, Optional
+
+from openai import OpenAI
+
+# Capture traces and spans in Arize Phoenix
+from phoenix.otel import register
+from openinference.instrumentation.openai import OpenAIInstrumentor
+
+# register() sets up an OTLP exporter that points at your local (or hosted)
+# Phoenix collector.  Set PHOENIX_COLLECTOR_ENDPOINT in .env if your Phoenix
+# server is not on the default http://localhost:6006.
+tracer_provider = register(
+  project_name="ecommerce-agent",
+  auto_instrument=True
+)
+
+# Patches the OpenAI client so every chat.completions.create call is traced
+# automatically – no manual span management needed in run_agent().
+OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 
 from dotenv import load_dotenv
 
@@ -50,9 +69,77 @@ app.jinja_env.filters['markdown'] = lambda text: markdown.markdown(text)
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# LangGraph ReAct agent
-# asynchronous function for running the agent
 
+# Input sanitization 
+
+# Phrases that are strong indicators of prompt-injection attempts.
+# Keeping the list explicit (rather than purely regex) makes it easy to audit
+# and extend without accidentally over-blocking legitimate fashion queries.
+_INJECTION_PATTERNS = [
+    r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions?",
+    r"disregard\s+(all\s+)?(previous|prior|above)\s+instructions?",
+    r"forget\s+(all\s+)?(previous|prior|above)\s+instructions?",
+    r"you\s+are\s+now\s+(?:a|an|the)\s+\w+",   # "you are now a pirate / DAN / …"
+    r"act\s+as\s+(?:a|an|the)\s+\w+",
+    r"do\s+not\s+follow\s+your\s+(system\s+)?prompt",
+    r"reveal\s+your\s+(system\s+)?prompt",
+    r"print\s+your\s+(system\s+)?prompt",
+    r"override\s+(your\s+)?(instructions?|rules?|guidelines?)",
+    r"pretend\s+(you\s+are|to\s+be)",
+    r"<\s*script[^>]*>",                        # HTML/JS injection
+    r"\{\{.*?\}\}",                             # Template injection  {{ ... }}
+    r"\$\{.*?\}",                               # Template injection  ${ ... }
+]
+_COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _INJECTION_PATTERNS]
+MAX_QUERY_LENGTH = 500  # characters; generous for a product search query
+
+def sanitize_input(text: str) -> tuple[str, str | None]:
+    """
+    Clean and validate user-supplied query text before it reaches the LLM.
+
+    Returns:
+        (cleaned_text, error_message)
+        If error_message is not None the input should be rejected and the
+        message shown to the user.
+
+    Sanitization steps
+    1. Strip leading/trailing whitespace.
+    2. Remove ASCII control characters (except newline/tab) – these can
+       confuse tokenisers and are never needed in a product query.
+    3. Enforce a maximum length to bound token cost and surface suspiciously
+       long payloads.
+    4. Scan for injection trigger phrases and bail out if any match.
+    """
+    if not text:
+        return "", "Query cannot be empty."
+
+    # Step 1 – strip whitespace
+    text = text.strip()
+
+    # Step 2 – remove ASCII control characters (0x00–0x1F) except \t and \n
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+
+    # Step 3 – length cap
+    if len(text) > MAX_QUERY_LENGTH:
+        return "", (
+            f"Query is too long ({len(text)} chars). "
+            f"Please keep it under {MAX_QUERY_LENGTH} characters."
+        )
+
+    # Step 4 – injection pattern check
+    for pattern in _COMPILED_PATTERNS:
+        if pattern.search(text):
+            # Log the raw attempt for your own monitoring; do NOT echo it back
+            # to the user (that can itself leak information about the filter).
+            app.logger.warning("Prompt injection attempt blocked: %r", text[:120])
+            return "", (
+                "Your query contains content that cannot be processed. "
+                "Please describe the product you are looking for."
+            )
+
+    return text, None
+
+# Embeddings 
 def generate_embeddings(input, is_image=True):
     if is_image:
         image = Image.open(input).convert("RGB")
@@ -157,7 +244,18 @@ def image_product_search(image):
     conn.close()
     return results
 
+# Agent
 def run_agent(query, image_path=None):
+    """
+    Two-turn ReAct loop:
+      Turn 1 → GPT-4o decides which tool to call (or replies directly).
+      Turn 2 → GPT-4o sees the tool result and produces the final answer.
+
+    Both turns are automatically captured as OpenTelemetry spans by the
+    OpenAIInstrumentor registered at startup, so they appear in Phoenix
+    under the project name set in PHOENIX_PROJECT_NAME.
+    """
+
     # Create a running input list we will add to over time
     messages = [
         {"role": "system", "content": "You are an ecommerce assistant. Use the tools to search products. When the user provides an image, use image_product_search to find similar products."},
@@ -178,6 +276,7 @@ def run_agent(query, image_path=None):
     
     messages.append({"role": "user", "content": user_content})
     
+    # Turn 1 – tool dispatch
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=messages,
@@ -209,6 +308,7 @@ def run_agent(query, image_path=None):
             "content": str(result)
         })
     
+    # Turn 2 – natural language answer
     # Send results back to GPT-4o for a natural language response
     final = client.chat.completions.create(
         model="gpt-4o",
@@ -217,6 +317,8 @@ def run_agent(query, image_path=None):
     
     return final.choices[0].message.content
 
+# Routes 
+
 @app.route("/", methods=['GET', 'POST'])
 def index():
     filename = None
@@ -224,16 +326,21 @@ def index():
     response = None
 
     if request.method == 'POST':
-        query = request.form.get("query", "").strip()
+        raw_query = request.form.get("query", "")
         file = request.files.get('file')
+
+        # Sanitize before anything else touches the query 
+        query, error = sanitize_input(raw_query)
+        if error:
+            flash(error, "danger")
         
         if not query:
             flash("Please enter a search query", "danger")
             return redirect(url_for("index"))
         
-        if file:
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'],  
-                                    file.filename)
+        filepath = None
+        if file and file.filename:
+            filepath = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
             file.save(filepath)
             filename = file.filename
 
