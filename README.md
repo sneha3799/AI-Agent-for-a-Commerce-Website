@@ -26,21 +26,16 @@ An AI-powered shopping assistant that handles general conversation, text-based p
 
 A single agent handles all three use cases through GPT-4o's native tool-calling:
 
-- **General conversation** — "What's your name?", "What can you do?" — the agent responds directly without calling any tool.
-
-The agent responds directly to open-ended questions without invoking any retrieval tool.
+- **General conversation** — "What's your name?", "What can you do?" — The agent responds directly to open-ended questions without invoking any retrieval tool.
 
 ![General chat — agent responding to "what is your name?"](general-chat.png)
 
-- **Text-based product recommendation** — "Recommend me blue jeans for men" — the agent calls `product_recommendation`, which embeds the query with CLIP and searches pgvector for similar products.
-
+- **Text-based product recommendation** — "Recommend me blue jeans for men" — the agent calls `product_recommendation`, which embeds the query with CLIP and searches pgvector for similar products. 
 A natural language query is embedded with CLIP and matched against the product catalog via pgvector cosine similarity.
 
 ![Text search — "blue denim jacket" returns three product recommendations](text-based-product-recommendation.png)
 
 - **Image-based product search** — User uploads a product image — GPT-4o sees the image via its vision capability and calls `image_product_search`, which embeds the image with CLIP and searches pgvector for visually similar products.
-
-The user uploads a product image; GPT-4o passes it to `image_product_search`, which embeds the image with CLIP and retrieves visually similar items.
 
 ![Image search — uploaded beige trousers matched to five similar products](image-based-product-search.png)
 
@@ -48,44 +43,7 @@ The user uploads a product image; GPT-4o passes it to `image_product_search`, wh
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────┐
-│              Chat UI (Flask + Bootstrap)          │
-│           Text input + image upload               │
-└──────────────────────┬──────────────────────────┘
-                       │ text / image
-                       ▼
-┌─────────────────────────────────────────────────┐
-│              Flask API (app.py)                   │
-│         Route: POST / → run_agent()               │
-└──────────────────────┬──────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────┐
-│      GPT-4o Agent (OpenAI function calling)       │
-│     Intent routing + tool dispatch + response     │
-│                                                   │
-│  ┌──────────┐  ┌──────────────┐  ┌────────────┐ │
-│  │ General  │  │   product_   │  │  image_    │  │
-│  │  Chat    │  │recommendation│  │product_    │  │
-│  │(no tool) │  │    (tool)    │  │search(tool)│  │
-│  └──────────┘  └──────┬───────┘  └─────┬──────┘ │
-└─────────────────────────┼──────────────┼────────┘
-                          │              │
-                          ▼              ▼
-               ┌─────────────────────────────────┐
-               │      CLIP ViT-B/32 (open_clip)   │
-               │   Shared text + image embedding   │
-               │         512 dimensions             │
-               └──────────────┬──────────────────┘
-                              │
-                              ▼
-               ┌──────────────────────────────────┐
-               │    PostgreSQL + pgvector           │
-               │  Product data + CLIP embeddings    │
-               │   Cosine similarity via <=>        │
-               └──────────────────────────────────┘
-```
+![High-level architecture diagram](architecture.png)
 
 **How the agent loop works:**
 
