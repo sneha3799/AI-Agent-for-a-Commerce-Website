@@ -47,15 +47,32 @@
     {% endif %}
 
     {% if response %}
-    <div class="results-section">
-      <div class="results-header">
-        <div class="results-dot"></div>
-        <span>Agent response</span>
+      <div class="results-section">
+        <div class="results-header">
+          <div class="results-dot"></div>
+          <span>Agent response</span>
+        </div>
+        <div class="results-body">
+          {{ response | markdown | safe }}
+        </div>
       </div>
-      <div class="results-body">
-        {{ response | markdown | safe }}
+    {% endif %}
+
+    {% if products %}
+      <div class="product-grid">
+        {% for product in products %}
+        <div class="product-card">
+          <div class="product-img-wrap">
+            <img src="{{ url_for('static', filename='images/' + product.image) }}" 
+                alt="{{ product.name }}" class="product-img">
+          </div>
+          <div class="product-info">
+            <span class="product-category">{{ product.category }} · {{ product.colour }}</span>
+            <h3 class="product-name">{{ product.name }}</h3>
+          </div>
+        </div>
+        {% endfor %}
       </div>
-    </div>
     {% endif %}
 
   </div>

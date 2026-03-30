@@ -191,7 +191,7 @@ def product_recommendation(query):
     results = []
     try:
         cur.execute("""
-            SELECT id, product_display_name
+            SELECT id, product_display_name, image_name, master_category, base_colour
             FROM products
             ORDER BY embedding <=> %s::vector
             LIMIT 5
@@ -214,7 +214,7 @@ def image_product_search(image):
     results = []
     try:
         cur.execute("""
-            SELECT id, product_display_name
+            SELECT id, product_display_name, image_name, master_category, base_colour
             FROM products
             ORDER BY embedding <=> %s::vector
             LIMIT 5
@@ -279,13 +279,16 @@ def run_agent(query, image_path=None):
     # Tool was called → execute it
     messages.append(message)  # add assistant's tool call to history
     
+    found_products = []
     for tool_call in message.tool_calls:
         args = json.loads(tool_call.function.arguments)
         
         if tool_call.function.name == "product_recommendation":
             result = product_recommendation(args["query"])
+            found_products = result
         elif tool_call.function.name == "image_product_search":
             result = image_product_search(image_path)
+            found_products = result
         
         messages.append({
             "role": "tool",
@@ -300,7 +303,19 @@ def run_agent(query, image_path=None):
         messages=messages
     )
     
-    return final.choices[0].message.content
+    return {
+        "text": final.choices[0].message.content,
+        "products": [
+            {
+                "id": p[0],
+                "name": p[1],
+                "image": os.path.basename(p[2]),  # turns "/Users/.../static/images/12345.jpg" into "12345.jpg"
+                "category": p[3],
+                "colour": p[4]
+            }
+            for p in found_products
+        ]
+    }
 
 # Routes 
 
@@ -333,8 +348,16 @@ def index():
             # Prompt the model with tools defined
             # client.chat.completions.create = Chat Completions API
             # client.responses.create =  Responses API
-            response = run_agent(query, filepath if file else None)
-            print(f'Results: {response}')
+            result = run_agent(query, filepath if file else None)
+            if isinstance(result, dict):
+                response = None
+                products = result["products"]
+            else:
+                response = result  # general chat, no products
+                products = []
+            return render_template('index.html', 
+                filename=filename, response=response, 
+                products=products, query=query)
         except Exception as exc:
             flash(f"Agent error: {exc}", "danger")
             return redirect(url_for("index"))
