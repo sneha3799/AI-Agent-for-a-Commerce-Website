@@ -16,9 +16,11 @@ An AI-powered shopping assistant that handles general conversation, text-based p
 6. [Constraint-Driven Design](#constraint-driven-design)
 7. [The Latency vs Quality vs Cost Triangle](#the-latency-vs-quality-vs-cost-triangle)
 8. [Failure Modes and Guardrails](#failure-modes-and-guardrails)
-9. [Getting Started](#getting-started)
-10. [Production Roadmap](#production-roadmap)
-11. [Key Architectural Decisions Summary](#key-architectural-decisions-summary)
+9. [Observability with Arize Phoenix](#observability-with-arize-phoenix)
+10. [Input Sanitization](#input-sanitization)
+11. [Getting Started](#getting-started)
+12. [Production Roadmap](#production-roadmap)
+13. [Key Architectural Decisions Summary](#key-architectural-decisions-summary)
 
 ---
 
@@ -147,14 +149,106 @@ The routing layer adds approx 50ms but saves roughly $3,000/month.
 - **Tool-call loop limit:** The agent loop runs a maximum number of tool-calling rounds to prevent runaway API costs from malformed queries.
 - **Graceful error handling:** Database connection failures and tool execution errors are caught and surfaced as user-friendly flash messages rather than crashing the app.
 - **Input validation:** Empty queries are rejected before reaching the agent.
+- **Prompt injection sanitization:** `sanitize_input()` strips control characters, enforces a 500-character length cap, and pattern-matches against injection trigger phrases (instruction overrides, persona hijacks, prompt exfiltration, template injection, HTML/JS injection) before any user input reaches the LLM. See [Input Sanitization](#input-sanitization) for details.
+- **Observability:** All LLM calls are traced end-to-end via Arize Phoenix — latency, token cost, input messages, and tool call arguments are captured automatically per request. See [Observability with Arize Phoenix](#observability-with-arize-phoenix) for details.
 
 ### Planned for production (via AWS Bedrock Guardrails)
 
 - **Cost guardrails:** Per-request token cap (3,000 input + 1,000 output), per-user daily cap (15,000 tokens/day). If either cap is hit, return a downgraded response rather than failing silently.
-- **Content filtering:** Block prompt injection attacks, PII detection, denied topic filtering. Bedrock Guardrails provides this as configuration.
+- **Content filtering:** PII detection and denied topic filtering. Bedrock Guardrails provides this as configuration, complementing the existing code-level injection sanitization.
 - **Retrieval quality:** Confidence threshold on similarity scores — if the top result's score is below 0.3, ask the user to refine their query rather than showing irrelevant products.
 - **LLM fallback chain:** GPT-4o failure triggers fallback to Claude Sonnet, then to a smaller model with a quality degradation warning.
-- **Observability:** Token usage per request, retrieval latency (P50/P95/P99), tool-call distribution, error rates. CloudWatch dashboards with alerts on daily spend exceeding 120% of budget.
+- **Extended observability:** Retrieval latency (P50/P95/P99), tool-call distribution, error rates, and per-user token budgets. CloudWatch dashboards with alerts on daily spend exceeding 120% of budget.
+
+---
+
+## Observability with Arize Phoenix
+
+Every LLM call in the agent is automatically traced using [Arize Phoenix](https://phoenix.arize.com/) via the OpenTelemetry-based `OpenAIInstrumentor`. No manual span management is needed — registering the instrumentor at startup patches the OpenAI client so both turns of the agent loop (tool-dispatch and final answer) are captured as linked spans.
+
+```python
+from phoenix.otel import register
+from openinference.instrumentation.openai import OpenAIInstrumentor
+
+tracer_provider = register(
+    project_name=os.getenv("PHOENIX_PROJECT_NAME", "ecommerce-ai-agent"),
+    endpoint=os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006/v1/traces"),
+)
+OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+```
+
+### What gets captured per request
+
+| Field | Example |
+|---|---|
+| Span kind | `LLM` (ChatCompletion) |
+| Model | `gpt-4o-2024-08-06` |
+| Input messages | System prompt, user query, tool results |
+| Tool calls | `product_recommendation({"query": "red denim jacket"})` |
+| Output | Final natural language response |
+| Latency | End-to-end per span |
+| Cost | Token-based cost estimate |
+
+A two-turn agent request (tool-dispatch + final answer) produces **two linked ChatCompletion spans** within a single trace, so you can see exactly what was passed to each turn and how long each took independently.
+
+### Spans view — project dashboard
+
+The Spans tab shows all LLM calls across the project with status, latency P50/P99, cost, and input/output previews at a glance.
+
+![Arize Phoenix spans view — two ChatCompletion spans for a "red denim jacket" query](arize-phoenix.png)
+
+### Trace detail — tool call inspection
+
+Clicking into a trace reveals the full input message history, the tool call the model decided to make (including the parsed arguments), and the tool result fed back for the second turn.
+
+![Phoenix trace detail — system prompt, user query, and product_recommendation tool call visible](traces.png)
+
+### Running Phoenix locally
+
+```bash
+pip install arize-phoenix arize-phoenix-otel openinference-instrumentation-openai
+python -m phoenix.server.main serve   # starts on http://localhost:6006
+```
+
+Then set in `.env`:
+
+```
+PHOENIX_PROJECT_NAME=ecommerce-agent
+PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006/v1/traces
+```
+
+---
+
+## Input Sanitization
+
+User queries are sanitized in `sanitize_input()` before they reach the agent, preventing prompt injection and bounding token cost.
+
+**Four-step pipeline:**
+
+1. **Strip whitespace** — trim leading/trailing whitespace.
+2. **Remove control characters** — strip ASCII control bytes (`0x00–0x1F`, `0x7F`) except tab and newline. These are invisible to users but can confuse tokenizers and are never present in legitimate product queries.
+3. **Length cap** — reject queries over 500 characters. Unusually long inputs are a common vector for burying injected instructions after legitimate-looking text.
+4. **Injection pattern matching** — scan against a compiled regex blocklist:
+
+| Pattern category | Example trigger phrases |
+|---|---|
+| Instruction override | `ignore previous instructions`, `disregard all prior instructions` |
+| Persona hijack | `you are now a ...`, `act as a ...`, `pretend to be ...` |
+| Prompt exfiltration | `reveal your prompt`, `print your system prompt` |
+| Rule bypass | `do not follow your prompt`, `override your guidelines` |
+| Template injection | `{{ ... }}`, `${ ... }` |
+| HTML/JS injection | `<script>` tags |
+
+**On a blocked input**, the raw query is written to `app.logger.warning` (visible in your server logs and Phoenix traces) but is **not echoed back** to the user — echoing rejected content can help an attacker tune their payload.
+
+```python
+query, error = sanitize_input(raw_query)
+if error:
+    flash(error, "danger")
+    return redirect(url_for("index"))
+```
+
+The sanitized string is what gets passed to `run_agent()` and, by extension, what appears in Phoenix traces — so traces always reflect the cleaned input, not raw user content.
 
 ---
 
