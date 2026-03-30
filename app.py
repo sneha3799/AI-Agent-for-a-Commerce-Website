@@ -6,24 +6,6 @@ import base64
 import markdown
 from typing import List, Optional
 
-from openai import OpenAI
-
-# Capture traces and spans in Arize Phoenix
-from phoenix.otel import register
-from openinference.instrumentation.openai import OpenAIInstrumentor
-
-# register() sets up an OTLP exporter that points at your local (or hosted)
-# Phoenix collector.  Set PHOENIX_COLLECTOR_ENDPOINT in .env if your Phoenix
-# server is not on the default http://localhost:6006.
-tracer_provider = register(
-  project_name="ecommerce-agent",
-  auto_instrument=True
-)
-
-# Patches the OpenAI client so every chat.completions.create call is traced
-# automatically – no manual span management needed in run_agent().
-OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
-
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -44,6 +26,22 @@ from flask import Flask, render_template, redirect, url_for, flash, request
 
 from openai import OpenAI
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+
+# Capture traces and spans in Arize Phoenix
+from phoenix.otel import register
+from openinference.instrumentation.openai import OpenAIInstrumentor
+
+# register() sets up an OTLP exporter that points at your local (or hosted)
+# Phoenix collector.  Set PHOENIX_COLLECTOR_ENDPOINT in .env if your Phoenix
+# server is not on the default http://localhost:6006.
+tracer_provider = register(
+  project_name="ecommerce-agent",
+  auto_instrument=True
+)
+
+# Patches the OpenAI client so every chat.completions.create call is traced
+# automatically – no manual span management needed in run_agent().
+OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # trade-off is that CLIP's text understanding is shallower
