@@ -10,6 +10,7 @@ tqdm.pandas()
 from dotenv import load_dotenv
 load_dotenv()
 db_url = os.getenv("DATABASE_URL")
+url = os.getenv('URL')
 
 from app import generate_embeddings
 
@@ -25,7 +26,7 @@ engine = create_engine(db_url)
 # with the database server. This session is persistent, meaning it remains open 
 # until you explicitly close it. This persistence allows you to send multiple queries
 #  and commands to the database without needing to establish a new connection each time. So, you have a continuous line of communication between your Python code and the database server, facilitated by this persistent client session.
-conn = psycopg2.connect("host=localhost dbname=myntradataset user=postgres password=Aimnit12")
+conn = psycopg2.connect(url)
 
 # Cursor object acts as a pointer or handler that allows you to execute SQL commands
 #  within your established database connection. It essentially bridges the gap
@@ -46,15 +47,16 @@ try:
         CREATE TABLE IF NOT EXISTS products(
             id integer PRIMARY KEY,
             gender text,
-            masterCategory text,
-            subCategory text,
-            articleType text,
-            baseColour text, 
-            season text, 
+            master_category text,
+            sub_category text,
+            article_type text,
+            base_colour text,
+            season text,
+            year double precision,
             usage text,
-            productDisplayName text,
-            imageName text,
-            embeddings vector(512)
+            product_display_name text,
+            image_name text,
+            embedding vector(512)
         )
     """)
 
@@ -69,7 +71,7 @@ filenames = [f for f in os.listdir(image_dir)]
 
 # Create DataFrame and save
 df = pd.read_csv(csv_path, on_bad_lines='skip', engine='python')
-df['ImageName'] = df['id'].apply(lambda x: str(image_dir / f"{x}.jpg"))
+df['imageName'] = df['id'].apply(lambda x: str(image_dir / f"{x}.jpg"))
 
 def safe_generate_embeddings(image_path):
     if not os.path.exists(image_path):
@@ -80,15 +82,30 @@ def safe_generate_embeddings(image_path):
         print(f"Error processing {image_path}: {e}")
         return None
 
-df['Embeddings'] = df['ImageName'].progress_apply(safe_generate_embeddings)
+df['embeddings'] = df['imageName'].progress_apply(safe_generate_embeddings)
 
 original_count = len(df)
 # Drop rows where embedding failed
-df = df.dropna(subset=['Embeddings'])
+df = df.dropna(subset=['embeddings'])
 print(f"{len(df)} images processed successfully")
 print(f"Kept {len(df)} / {original_count} products ({original_count - len(df)} missing images)")
 
-df.to_csv(csv_path, index=False)
+df = df.rename(columns={
+    'masterCategory': 'master_category',
+    'subCategory': 'sub_category',
+    'articleType': 'article_type',
+    'baseColour': 'base_colour',
+    'productDisplayName': 'product_display_name',
+    'imageName': 'image_name',       
+    'embeddings': 'embedding' 
+})
+
+keep_columns = ['id', 'gender', 'master_category', 'sub_category', 'article_type',
+                'base_colour', 'season', 'year', 'usage', 'product_display_name',
+                'image_name', 'embedding']
+df = df[keep_columns]
+
+# df.to_csv(csv_path, index=False)
 # Perform the data loading operation
 # With the to_sql() method, pandas handles the data transfer efficiently, leveraging PostgreSQL's capabilities in the background. 
 # Then append data (preserves your schema)
