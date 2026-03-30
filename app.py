@@ -3,6 +3,7 @@ import json
 import asyncio
 import psycopg2
 import base64
+import markdown
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -32,6 +33,7 @@ client = OpenAI(
 )
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+# trade-off is that CLIP's text understanding is shallower
 model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
 tokenizer = open_clip.get_tokenizer('ViT-B-32')
 model.to(device)
@@ -42,6 +44,9 @@ app = Flask(__name__)
 app.secret_key = 'secretkey-not-for-prod'
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# GPT-4o returns markdown (**bold**, 1. item) but Jinja renders it as plain text. 
+# You need to convert markdown to HTML before displaying it.
+app.jinja_env.filters['markdown'] = lambda text: markdown.markdown(text)
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -152,12 +157,8 @@ def image_product_search(image):
     conn.close()
     return results
 
-# Create a running input list we will add to over time
-input_list = [
-    {"role": "system", "content": "You are a ecommerce search assistant to help customers get the right product based on their needs."}
-]
-
 def run_agent(query, image_path=None):
+    # Create a running input list we will add to over time
     messages = [
         {"role": "system", "content": "You are an ecommerce assistant. Use the tools to search products. When the user provides an image, use image_product_search to find similar products."},
     ]

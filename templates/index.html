@@ -1,39 +1,81 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="row justify-content-center">
-  <div class="col-lg-10">
-    <form method="post" enctype="multipart/form-data" class="card shadow-sm mb-4">
-      <div class="card-body">
-        <h5 class="card-title">Search products or content</h5>
+  <div class="col-lg-8">
 
-        <div class="mb-3">
-          <input name="query"
-                 class="form-control form-control-lg"
-                 placeholder="E.g. 'best budget gaming laptop'"
-                 value="{{ query }}"
-                 required>
-        </div>
+    <div class="hero-section">
+      <h1 class="hero-title">What are you looking for?</h1>
+      <p class="hero-sub">Describe a product or upload an image to find similar items in our catalog.</p>
+    </div>
 
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Select image:</label>
-          <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 g-1">
-            <input type="file" name="file" accept="image/*">
-            <button type="submit">Upload</button>
-          </div>
-        </div>
+    <form method="post" enctype="multipart/form-data" class="search-card">
+      <div class="search-input-row">
+        <input name="query"
+               class="search-input"
+               placeholder="e.g. 'blue denim jacket' or 'formal shoes for men'"
+               value="{{ query }}"
+               required
+               autocomplete="off">
+        <button type="submit" class="search-btn" title="Search">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </button>
+      </div>
 
-        <button class="btn btn-lg btn-primary">Run agent</button>
+      <div class="upload-row">
+        <label class="upload-label" id="uploadLabel">
+          <input type="file" name="file" accept="image/*" id="fileInput" hidden>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+          <span id="uploadText">Upload an image to search visually</span>
+        </label>
       </div>
     </form>
 
     {% if filename %}
-        <h2>Preview:</h2>
-        <img src="{{ url_for('static', filename='uploads/' + filename) }}" style="max-width: 300px;">
+    <div class="preview-card">
+      <div class="preview-header">
+        <span class="preview-badge">Uploaded image</span>
+      </div>
+      <img src="{{ url_for('static', filename='uploads/' + filename) }}" class="preview-img" alt="Uploaded product image">
+    </div>
     {% endif %}
+
     {% if response %}
-        <h2>Results:</h2>
-        <p>{{ response }}</p>
+    <div class="results-section">
+      <div class="results-header">
+        <div class="results-dot"></div>
+        <span>Agent response</span>
+      </div>
+      <div class="results-body">
+        {{ response | markdown | safe }}
+      </div>
+    </div>
     {% endif %}
+
   </div>
 </div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const uploadLabel = document.getElementById('uploadLabel');
+  const uploadText = document.getElementById('uploadText');
+
+  uploadLabel.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', function() {
+    if (this.files && this.files[0]) {
+      uploadText.textContent = this.files[0].name;
+      uploadLabel.classList.add('has-file');
+    } else {
+      uploadText.textContent = 'Upload an image to search visually';
+      uploadLabel.classList.remove('has-file');
+    }
+  });
+</script>
 {% endblock %}

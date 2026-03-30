@@ -9,15 +9,16 @@ An AI-powered shopping assistant that handles general conversation, text-based p
 ## Table of Contents
 
 1. [Features](#features)
-2. [Architecture Overview](#architecture-overview)
-3. [Technology Stack](#technology-stack)
-4. [Technology Choices and Trade-offs](#technology-choices-and-trade-offs)
-5. [Constraint-Driven Design](#constraint-driven-design)
-6. [The Latency vs Quality vs Cost Triangle](#the-latency-vs-quality-vs-cost-triangle)
-7. [Failure Modes and Guardrails](#failure-modes-and-guardrails)
-8. [Getting Started](#getting-started)
-9. [Production Roadmap](#production-roadmap)
-10. [Key Architectural Decisions Summary](#key-architectural-decisions-summary)
+2. [Screenshots](#screenshots)
+3. [Architecture Overview](#architecture-overview)
+4. [Technology Stack](#technology-stack)
+5. [Technology Choices and Trade-offs](#technology-choices-and-trade-offs)
+6. [Constraint-Driven Design](#constraint-driven-design)
+7. [The Latency vs Quality vs Cost Triangle](#the-latency-vs-quality-vs-cost-triangle)
+8. [Failure Modes and Guardrails](#failure-modes-and-guardrails)
+9. [Getting Started](#getting-started)
+10. [Production Roadmap](#production-roadmap)
+11. [Key Architectural Decisions Summary](#key-architectural-decisions-summary)
 
 ---
 
@@ -26,8 +27,22 @@ An AI-powered shopping assistant that handles general conversation, text-based p
 A single agent handles all three use cases through GPT-4o's native tool-calling:
 
 - **General conversation** — "What's your name?", "What can you do?" — the agent responds directly without calling any tool.
+
+The agent responds directly to open-ended questions without invoking any retrieval tool.
+
+![General chat — agent responding to "what is your name?"](general-chat.png)
+
 - **Text-based product recommendation** — "Recommend me blue jeans for men" — the agent calls `product_recommendation`, which embeds the query with CLIP and searches pgvector for similar products.
+
+A natural language query is embedded with CLIP and matched against the product catalog via pgvector cosine similarity.
+
+![Text search — "blue denim jacket" returns three product recommendations](text-based-product-recommendation.png)
+
 - **Image-based product search** — User uploads a product image — GPT-4o sees the image via its vision capability and calls `image_product_search`, which embeds the image with CLIP and searches pgvector for visually similar products.
+
+The user uploads a product image; GPT-4o passes it to `image_product_search`, which embeds the image with CLIP and retrieves visually similar items.
+
+![Image search — uploaded beige trousers matched to five similar products](image-based-product-search.png)
 
 ---
 
