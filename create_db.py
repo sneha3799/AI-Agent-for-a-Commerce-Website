@@ -105,7 +105,6 @@ keep_columns = ['id', 'gender', 'master_category', 'sub_category', 'article_type
                 'image_name', 'embedding']
 df = df[keep_columns]
 
-# df.to_csv(csv_path, index=False)
 # Perform the data loading operation
 # With the to_sql() method, pandas handles the data transfer efficiently, leveraging PostgreSQL's capabilities in the background. 
 # Then append data (preserves your schema)

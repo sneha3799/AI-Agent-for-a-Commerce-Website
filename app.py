@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import asyncio
 import psycopg2
 import base64
 import markdown
@@ -26,6 +25,7 @@ tracer_provider = register(
 OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 
 from dotenv import load_dotenv
+load_dotenv()
 
 # For structured output combined with typing 
 from pydantic import BaseModel, Field 
@@ -42,14 +42,8 @@ from PIL import Image
 # request: handles details of the request
 from flask import Flask, render_template, redirect, url_for, flash, request
 
-load_dotenv()
-
-# from langchain_openai import ChatOpenAI, custom_tool
-# from langchain.agents import create_agent
 from openai import OpenAI
-client = OpenAI(
-    api_key=os.getenv('OPENAI_API_KEY')
-)
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # trade-off is that CLIP's text understanding is shallower
@@ -68,7 +62,6 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.jinja_env.filters['markdown'] = lambda text: markdown.markdown(text)
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
 
 # Input sanitization 
 
@@ -215,14 +208,7 @@ def product_recommendation(query):
     return results
 
 def image_product_search(image):
-    # if query is None:
     embedding = generate_embeddings(image)
-    # elif image is None:
-    #     embedding = generate_embeddings(query, is_image=False)
-    # else:
-    #     image_vector = generate_embeddings(image)
-    #     text_vector = generate_embeddings(query, is_image=False)
-    #     embedding = [(a + b) / 2 for a, b in zip(text_vector, image_vector)]
     
     conn = psycopg2.connect(url)
     cur = conn.cursor()
@@ -245,6 +231,7 @@ def image_product_search(image):
     return results
 
 # Agent
+
 def run_agent(query, image_path=None):
     """
     Two-turn ReAct loop:
