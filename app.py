@@ -362,7 +362,7 @@ def index():
             flash(f"Agent error: {exc}", "danger")
             return redirect(url_for("index"))
         
-    return render_template('index.html', filename=filename, response=response, query=query)
+    return render_template('index.html', filename=filename, response=response, query=query, products=[])
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8000, debug=True)
