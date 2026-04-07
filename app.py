@@ -1,8 +1,4 @@
 import os
-import re
-import json
-import psycopg2
-import base64
 import markdown
 from typing import List, Optional
 
@@ -12,10 +8,6 @@ load_dotenv()
 # For structured output combined with typing 
 from pydantic import BaseModel, Field 
 
-import open_clip
-import torch
-from PIL import Image
-
 # Flask : the application
 # render_template : renders HTML docs
 # redirect : reroutes to another route
@@ -24,32 +16,12 @@ from PIL import Image
 # request: handles details of the request
 from flask import Flask, render_template, redirect, url_for, flash, request
 
-from openai import OpenAI
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-
-# Capture traces and spans in Arize Phoenix
-from phoenix.otel import register
-from openinference.instrumentation.openai import OpenAIInstrumentor
-
-# register() sets up an OTLP exporter that points at your local (or hosted)
-# Phoenix collector.  Set PHOENIX_COLLECTOR_ENDPOINT in .env if your Phoenix
-# server is not on the default http://localhost:6006.
-tracer_provider = register(
-  project_name="ecommerce-agent",
-  auto_instrument=True
-)
-
+from guardrails.sanitization import sanitize_input
+from agent.orchestrator import run_agent
+from observability.traces import instrumentor, tracer_provider
 # Patches the OpenAI client so every chat.completions.create call is traced
 # automatically – no manual span management needed in run_agent().
-OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-# trade-off is that CLIP's text understanding is shallower
-model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
-tokenizer = open_clip.get_tokenizer('ViT-B-32')
-model.to(device)
-
-url = os.getenv('URL')
+instrumentor.instrument(tracer_provider=tracer_provider)
 
 app = Flask(__name__)
 app.secret_key = 'secretkey-not-for-prod'
@@ -60,262 +32,6 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.jinja_env.filters['markdown'] = lambda text: markdown.markdown(text)
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# Input sanitization 
-
-# Phrases that are strong indicators of prompt-injection attempts.
-# Keeping the list explicit (rather than purely regex) makes it easy to audit
-# and extend without accidentally over-blocking legitimate fashion queries.
-_INJECTION_PATTERNS = [
-    r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions?",
-    r"disregard\s+(all\s+)?(previous|prior|above)\s+instructions?",
-    r"forget\s+(all\s+)?(previous|prior|above)\s+instructions?",
-    r"you\s+are\s+now\s+(?:a|an|the)\s+\w+",   # "you are now a pirate / DAN / …"
-    r"act\s+as\s+(?:a|an|the)\s+\w+",
-    r"do\s+not\s+follow\s+your\s+(system\s+)?prompt",
-    r"reveal\s+your\s+(system\s+)?prompt",
-    r"print\s+your\s+(system\s+)?prompt",
-    r"override\s+(your\s+)?(instructions?|rules?|guidelines?)",
-    r"pretend\s+(you\s+are|to\s+be)",
-    r"<\s*script[^>]*>",                        # HTML/JS injection
-    r"\{\{.*?\}\}",                             # Template injection  {{ ... }}
-    r"\$\{.*?\}",                               # Template injection  ${ ... }
-]
-_COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _INJECTION_PATTERNS]
-MAX_QUERY_LENGTH = 500  # characters; generous for a product search query
-
-def sanitize_input(text: str) -> tuple[str, str | None]:
-    """
-    Clean and validate user-supplied query text before it reaches the LLM.
-
-    Returns:
-        (cleaned_text, error_message)
-        If error_message is not None the input should be rejected and the
-        message shown to the user.
-
-    Sanitization steps
-    1. Strip leading/trailing whitespace.
-    2. Remove ASCII control characters (except newline/tab) – these can
-       confuse tokenisers and are never needed in a product query.
-    3. Enforce a maximum length to bound token cost and surface suspiciously
-       long payloads.
-    4. Scan for injection trigger phrases and bail out if any match.
-    """
-    if not text:
-        return "", "Query cannot be empty."
-
-    # Step 1 – strip whitespace
-    text = text.strip()
-
-    # Step 2 – remove ASCII control characters (0x00–0x1F) except \t and \n
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
-
-    # Step 3 – length cap
-    if len(text) > MAX_QUERY_LENGTH:
-        return "", (
-            f"Query is too long ({len(text)} chars). "
-            f"Please keep it under {MAX_QUERY_LENGTH} characters."
-        )
-
-    # Step 4 – injection pattern check
-    for pattern in _COMPILED_PATTERNS:
-        if pattern.search(text):
-            # Log the raw attempt for your own monitoring; do NOT echo it back
-            # to the user (that can itself leak information about the filter).
-            app.logger.warning("Prompt injection attempt blocked: %r", text[:120])
-            return "", (
-                "Your query contains content that cannot be processed. "
-                "Please describe the product you are looking for."
-            )
-
-    return text, None
-
-# Embeddings 
-def generate_embeddings(input, is_image=True):
-    if is_image:
-        image = Image.open(input).convert("RGB")
-        image_input = preprocess(image).unsqueeze(0).to(device)
-        with torch.no_grad():
-            embedding = model.encode_image(image_input)
-    else:
-        text_input = tokenizer([input]).to(device)
-        with torch.no_grad():
-            embedding = model.encode_text(text_input)
-    embedding /= embedding.norm(dim=-1, keepdim=True)
-    return embedding.squeeze(0).cpu().numpy().tolist()
-
-# Define a list of callable tools for the model
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "product_recommendation",
-            "description": "Text-Based Product Recommendation",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Question around product recommendations",
-                    },
-                },
-                "required": ["query"],
-            },
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "image_product_search",
-            "description": "Image-Based Product Search",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file": {
-                        "type": "string",
-                        "description": "path to the image file",
-                    },
-                },
-                "required": ["file"],
-            },
-        },
-    }
-]
-
-def product_recommendation(query):
-    embedding = generate_embeddings(query, is_image=False)
-    
-    conn = psycopg2.connect(url)
-    cur = conn.cursor()
-    
-    results = []
-    try:
-        cur.execute("""
-            SELECT id, product_display_name, image_name, master_category, base_colour
-            FROM products
-            ORDER BY embedding <=> %s::vector
-            LIMIT 5
-        """, (embedding, ))
-        results = cur.fetchall()
-    except Exception as e:
-        print(f"Error: {e}")
-        conn.rollback()
-
-    cur.close()
-    conn.close()
-    return results
-
-def image_product_search(image):
-    embedding = generate_embeddings(image)
-    
-    conn = psycopg2.connect(url)
-    cur = conn.cursor()
-    
-    results = []
-    try:
-        cur.execute("""
-            SELECT id, product_display_name, image_name, master_category, base_colour
-            FROM products
-            ORDER BY embedding <=> %s::vector
-            LIMIT 5
-        """, (embedding, ))
-        results = cur.fetchall()
-    except Exception as e:
-        print(f"Error: {e}")
-        conn.rollback()
-
-    cur.close()
-    conn.close()
-    return results
-
-# Agent
-
-def run_agent(query, image_path=None):
-    """
-    Two-turn ReAct loop:
-      Turn 1 → GPT-4o decides which tool to call (or replies directly).
-      Turn 2 → GPT-4o sees the tool result and produces the final answer.
-
-    Both turns are automatically captured as OpenTelemetry spans by the
-    OpenAIInstrumentor registered at startup, so they appear in Phoenix
-    under the project name set in PHOENIX_PROJECT_NAME.
-    """
-
-    # Create a running input list we will add to over time
-    messages = [
-        {"role": "system", "content": "You are an ecommerce assistant. Use the tools to search products. When the user provides an image, use image_product_search to find similar products."},
-    ]
-
-    # Build user message based on whether image is provided
-    if image_path:
-        with open(image_path, "rb") as f:
-            # sends the image inline so GPT-4o can see it, and it will then call image_product_search. Your CLIP function separately embeds the image from image_path for the pgvector search.
-            image_b64 = base64.b64encode(f.read()).decode("utf-8")
-        
-        user_content = [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
-            {"type": "text", "text": query}
-        ]
-    else:
-        user_content = query
-    
-    messages.append({"role": "user", "content": user_content})
-    
-    # Turn 1 – tool dispatch
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        tools=tools,
-        tool_choice="auto"
-    )
-    
-    print(f'Response: {response}')
-    message = response.choices[0].message
-    
-    # If no tool call → general conversation, return directly
-    if not message.tool_calls:
-        return message.content
-    
-    # Tool was called → execute it
-    messages.append(message)  # add assistant's tool call to history
-    
-    found_products = []
-    for tool_call in message.tool_calls:
-        args = json.loads(tool_call.function.arguments)
-        
-        if tool_call.function.name == "product_recommendation":
-            result = product_recommendation(args["query"])
-            found_products = result
-        elif tool_call.function.name == "image_product_search":
-            result = image_product_search(image_path)
-            found_products = result
-        
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call.id,
-            "content": str(result)
-        })
-    
-    # Turn 2 – natural language answer
-    # Send results back to GPT-4o for a natural language response
-    final = client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages
-    )
-    
-    return {
-        "text": final.choices[0].message.content,
-        "products": [
-            {
-                "id": p[0],
-                "name": p[1],
-                "image": os.path.basename(p[2]),  # turns "/Users/.../static/images/12345.jpg" into "12345.jpg"
-                "category": p[3],
-                "colour": p[4]
-            }
-            for p in found_products
-        ]
-    }
 
 # Routes 
 

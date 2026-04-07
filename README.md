@@ -30,22 +30,22 @@ A single agent handles all three use cases through GPT-4o's native tool-calling:
 
 - **General conversation** — "What's your name?", "What can you do?" — The agent responds directly to open-ended questions without invoking any retrieval tool.
 
-![General chat — agent responding to "what is your name?"](general-chat.png)
+![General chat — agent responding to "what is your name?"](UI_images/general-chat.png)
 
 - **Text-based product recommendation** — "Recommend me blue jeans for men" — the agent calls `product_recommendation`, which embeds the query with CLIP and searches pgvector for similar products. 
 A natural language query is embedded with CLIP and matched against the product catalog via pgvector cosine similarity.
 
-![Text search — "blue denim jacket" returns three product recommendations](text-based-product-recommendation.png)
+![Text search — "blue denim jacket" returns three product recommendations](UI_images/text-based-product-recommendation.png)
 
 - **Image-based product search** — User uploads a product image — GPT-4o sees the image via its vision capability and calls `image_product_search`, which embeds the image with CLIP and searches pgvector for visually similar products.
 
-![Image search — uploaded beige trousers matched to five similar products](image-based-product-search.png)
+![Image search — uploaded beige trousers matched to five similar products](UI_images/image-based-product-search.png)
 
 ---
 
 ## Architecture Overview
 
-![High-level architecture diagram](architecture.png)
+![High-level architecture diagram](UI_images/architecture.png)
 
 **How the agent loop works:**
 
@@ -195,13 +195,13 @@ A two-turn agent request (tool-dispatch + final answer) produces **two linked Ch
 
 The Spans tab shows all LLM calls across the project with status, latency P50/P99, cost, and input/output previews at a glance.
 
-![Arize Phoenix spans view — two ChatCompletion spans for a "red denim jacket" query](arize-phoenix.png)
+![Arize Phoenix spans view — two ChatCompletion spans for a "red denim jacket" query](UI_images/arize-phoenix.png)
 
 ### Trace detail — tool call inspection
 
 Clicking into a trace reveals the full input message history, the tool call the model decided to make (including the parsed arguments), and the tool result fed back for the second turn.
 
-![Phoenix trace detail — system prompt, user query, and product_recommendation tool call visible](traces.png)
+![Phoenix trace detail — system prompt, user query, and product_recommendation tool call visible](UI_images/traces.png)
 
 ### Running Phoenix locally
 
