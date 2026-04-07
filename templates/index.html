@@ -4,8 +4,12 @@
   <div class="col-lg-8">
 
     <div class="hero-section">
+      <div class="ai-badge">
+        <span class="ai-badge-dot"></span>
+        AI Shopping Assistant
+      </div>
       <h1 class="hero-title">What are you looking for?</h1>
-      <p class="hero-sub">Describe a product or upload an image to find similar items in our catalog.</p>
+      <p class="hero-sub">Describe a product or upload an image to find similar items.</p>
     </div>
 
     <form method="post" enctype="multipart/form-data" class="search-card">
@@ -49,8 +53,9 @@
     {% if response %}
       <div class="results-section">
         <div class="results-header">
-          <div class="results-dot"></div>
-          <span>Agent response</span>
+          <div class="ai-avatar">AI</div>
+          <span class="results-header-text">Shopping Assistant</span>
+          <span class="results-header-sub">AI-powered</span>
         </div>
         <div class="results-body">
           {{ response | markdown | safe }}

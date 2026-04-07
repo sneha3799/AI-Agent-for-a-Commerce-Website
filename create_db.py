@@ -12,7 +12,7 @@ load_dotenv()
 db_url = os.getenv("DATABASE_URL")
 url = os.getenv('URL')
 
-from app import generate_embeddings
+from retrieval.embedder import generate_embeddings
 
 # Use os.path.expanduser to handle '~'
 base_dir = Path(__file__).parent  # assumes script is in palona_ai_agent/

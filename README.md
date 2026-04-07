@@ -30,16 +30,16 @@ A single agent handles all three use cases through GPT-4o's native tool-calling:
 
 - **General conversation** — "What's your name?", "What can you do?" — The agent responds directly to open-ended questions without invoking any retrieval tool.
 
-![General chat — agent responding to "what is your name?"](UI_images/general-chat.png)
+![General chat — agent responding to "what is your name?"](UI_images/general_chat_latest.png)
 
 - **Text-based product recommendation** — "Recommend me blue jeans for men" — the agent calls `product_recommendation`, which embeds the query with CLIP and searches pgvector for similar products. 
 A natural language query is embedded with CLIP and matched against the product catalog via pgvector cosine similarity.
 
-![Text search — "blue denim jacket" returns three product recommendations](UI_images/text-based-product-recommendation.png)
+![Text search — "blue denim jacket" returns three product recommendations](UI_images/product_recommendation_latest.png)
 
 - **Image-based product search** — User uploads a product image — GPT-4o sees the image via its vision capability and calls `image_product_search`, which embeds the image with CLIP and searches pgvector for visually similar products.
 
-![Image search — uploaded beige trousers matched to five similar products](UI_images/image-based-product-search.png)
+![Image search — uploaded beige trousers matched to five similar products](UI_images/image_product_search_latest.png)
 
 ---
 
@@ -321,19 +321,25 @@ Visit `http://localhost:8000`.
 
 ```
 palona_ai_agent/
-├── app.py                 # Flask app, agent loop, tool functions, CLIP embeddings
-├── create_db.py           # Database setup + product ingestion with CLIP embeddings
+├── app.py                 # Flask app setup + routes only
+├── agent/
+│   ├── __init__.py
+│   ├── orchestrator.py    # run_agent() + tool definitions
+│   └── tools.py           # product_recommendation(), image_product_search()
+├── retrieval/
+│   ├── __init__.py
+│   └── embedder.py        # generate_embeddings(), CLIP model loading
+├── guardrails/
+│   ├── __init__.py
+│   └── sanitizer.py       # sanitize_input(), injection patterns
+├── observability/
+│   ├── __init__.py
+│   └── traces.py       # tracer_provider, instrumentor initialization
+├── create_db.py           # Database ingestion script
 ├── static/
-│   ├── style.css          # UI styling
-│   ├── images/            # Product images (from Kaggle dataset)
-│   └── uploads/           # User-uploaded images for search
 ├── templates/
-│   ├── base.html          # Base layout with navigation
-│   └── index.html         # Search form + results display
-├── myntradataset/
-│   └── styles.csv         # Product catalog CSV
-├── .env.example           # Environment variable template
-├── pyproject.toml         # Project dependencies
+├── .env.example
+├── pyproject.toml
 └── README.md
 ```
 

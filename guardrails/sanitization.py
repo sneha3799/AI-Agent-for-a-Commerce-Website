@@ -1,6 +1,8 @@
 # Input sanitization 
 import re
-import app
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Phrases that are strong indicators of prompt-injection attempts.
 # Keeping the list explicit (rather than purely regex) makes it easy to audit
@@ -61,7 +63,7 @@ def sanitize_input(text: str) -> tuple[str, str | None]:
         if pattern.search(text):
             # Log the raw attempt for your own monitoring; do NOT echo it back
             # to the user (that can itself leak information about the filter).
-            app.logger.warning("Prompt injection attempt blocked: %r", text[:120])
+            logger.warning("Prompt injection attempt blocked: %r", text[:120])
             return "", (
                 "Your query contains content that cannot be processed. "
                 "Please describe the product you are looking for."

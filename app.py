@@ -1,12 +1,11 @@
 import os
 import markdown
-from typing import List, Optional
 
 from dotenv import load_dotenv
 load_dotenv()
 
 # For structured output combined with typing 
-from pydantic import BaseModel, Field 
+# from pydantic import BaseModel, Field 
 
 # Flask : the application
 # render_template : renders HTML docs
