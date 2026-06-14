@@ -16,7 +16,7 @@ load_dotenv()
 from flask import Flask, render_template, redirect, url_for, flash, request
 
 from guardrails.sanitization import sanitize_input
-from agent.orchestrator import run_agent
+from agent.strands_agent import run_agent
 from observability.traces import instrumentor, tracer_provider
 # Patches the OpenAI client so every chat.completions.create call is traced
 # automatically – no manual span management needed in run_agent().
@@ -63,17 +63,20 @@ def index():
             # Prompt the model with tools defined
             # client.chat.completions.create = Chat Completions API
             # client.responses.create =  Responses API
-            result = run_agent(query, filepath if file else None)
+            result = run_agent(query, filepath)
+            print("✅ run_agent result:", result)
             if isinstance(result, dict):
-                response = None
-                products = result["products"]
+                response = result.get("text", "")  
+                products = result.get("products", [])
             else:
-                response = result  # general chat, no products
+                response = result
                 products = []
             return render_template('index.html', 
                 filename=filename, response=response, 
                 products=products, query=query)
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             flash(f"Agent error: {exc}", "danger")
             return redirect(url_for("index"))
         
