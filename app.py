@@ -64,7 +64,6 @@ def index():
             # client.chat.completions.create = Chat Completions API
             # client.responses.create =  Responses API
             result = run_agent(query, filepath)
-            print("✅ run_agent result:", result)
             if isinstance(result, dict):
                 response = result.get("text", "")  
                 products = result.get("products", [])

@@ -1,0 +1,29 @@
+# Web framework
+Flask==2.2.5
+gunicorn==20.1.0
+Markdown==3.4.4
+python-dotenv==1.0.0
+
+# Agent framework
+strands-agents
+
+# AWS
+boto3>=1.38.0
+
+# Database
+psycopg2-binary==2.9.6
+pgvector
+
+# Embeddings / image search
+open-clip-torch
+Pillow
+
+# Data
+pydantic==2.9.2
+numpy
+requests==2.31.0
+
+# Observability
+arize-phoenix-otel
+openinference-instrumentation-openai
+opentelemetry-instrumentation-threading

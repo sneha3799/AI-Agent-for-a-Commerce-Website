@@ -15,7 +15,9 @@ model_id = BedrockModel(
     # model_id="us.anthropic.claude-sonnet-4-6",
     # model_id="us.amazon.nova-lite-v1:0",  # lighter model, higher limits
     model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0", 
-    region_name=os.getenv("AWS_REGION", "us-east-1")
+    region_name=os.getenv("AWS_REGION", "us-east-1"),
+    guardrail_id=os.getenv("GUARDRAIL_ID"),
+    guardrail_version=os.getenv("GUARDRAIL_VERSION")
 )
 
 # Define the system prompt
@@ -76,6 +78,21 @@ def run_agent(query, image_path=None):
             structured_output_model=ProductDetails
         )
 
+    # Check if guardrail blocked the response
+    guardrail_action = getattr(response, 'stop_reason', None)
+    if guardrail_action == 'guardrail_intervened':
+        return {
+            "text": "I'm sorry, I'm only able to help with fashion product searches and general questions about our store.",
+            "products": []
+        }
+
+    output = response.structured_output
+    if output is None:
+        return {
+            "text": "I'm sorry, I can't help with that request.",
+            "products": []
+        }
+    
     # response type <class 'strands.agent.agent_result.AgentResult'>
     # structured output type <class 'agent.strands_agent.ProductDetails'>
     return {
