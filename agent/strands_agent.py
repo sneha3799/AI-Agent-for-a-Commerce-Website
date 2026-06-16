@@ -7,7 +7,8 @@ import imghdr
 from strands import Agent
 from strands.models import BedrockModel
 from agent.tools import product_recommendation, image_product_search
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, Field, field_validator
 from typing import List
 
 # Define the model
@@ -44,11 +45,10 @@ agent = Agent(
 
 # Define a custom output structure using Pydantic models
 class ProductDetails(BaseModel):
-    """Product Details"""
-    text: str = Field(description="Model response text")
+    text: str = Field(default="", description="Model response text")
     products: List[dict] = Field(
         default=[],
-        description="Product details such as id, product_display_name, image_name, master_category, base_colour"
+        description="Product details including id, product_display_name, image_name, master_category, base_colour. ALWAYS include image_name field."
     )
 
 # Run the agent
@@ -102,7 +102,7 @@ def run_agent(query, image_path=None):
             {
                 "id": p.get("id"),
                 "name": p.get("product_display_name"),
-                "image": os.path.basename(p.get("image_name", "")),
+                "image": p.get("image_name"),
                 "category": p.get("master_category"),
                 "colour": p.get("base_colour")
             }

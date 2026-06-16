@@ -68,7 +68,7 @@
         {% for product in products %}
         <div class="product-card">
           <div class="product-img-wrap">
-            <img src="{{ url_for('static', filename='images/' + product.id|string + '.jpg') }}" 
+            <img src="{{ product.image }}" 
                 alt="{{ product.name }}" class="product-img">
           </div>
           <div class="product-info">
