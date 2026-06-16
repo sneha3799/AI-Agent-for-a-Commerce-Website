@@ -45,7 +45,7 @@ A natural language query is embedded with CLIP and matched against the product c
 
 ## Architecture Overview
 
-![High-level architecture diagram](UI_images/architecture.png)
+![High-level architecture diagram](UI_images/commerce_agent_aws_architecture.png)
 
 **How the agent loop works:**
 
