@@ -62,12 +62,17 @@ A natural language query is embedded with CLIP and matched against the product c
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| LLM / Orchestrator | GPT-4o (OpenAI Chat Completions API) | Intent routing via function calling, vision for image input, response generation |
+| LLM / Orchestrator | Claude Haiku 4.5 (via AWS Bedrock) | Intent routing via tool-calling, vision for image input, response generation |
+| Agent Framework | Strands Agents SDK | Agentic tool-calling loop, structured output, provider-agnostic orchestration |
+| Guardrails | Amazon Bedrock Guardrails | Content filtering, denied topics, word filters, PII detection, grounding checks |
 | Embedding model | CLIP ViT-B/32 (via open_clip) | Multimodal embedding — text and images into shared 512-dim vector space |
 | Vector search | pgvector (PostgreSQL extension) | Cosine similarity search on product embeddings |
-| Database | PostgreSQL | Product catalog (44K products from Myntra dataset) + embeddings in one table |
-| Backend | Flask | API routes, file upload handling, template rendering |
+| Database | PostgreSQL (AWS RDS) | Product catalog (44K products from Myntra dataset) + embeddings in one table |
+| Object Storage | AWS S3 | Product image hosting with public CDN access |
+| Backend | Flask + Gunicorn | API routes, file upload handling, template rendering |
 | Frontend | Bootstrap 5 + vanilla JS | Search UI with text input and image upload |
+| Deployment | AWS ECS Fargate + ECR | Containerised deployment, auto-scaling, no server management |
+| Observability | Arize Phoenix + OpenTelemetry | End-to-end LLM tracing, latency, token cost, tool call arguments |
 | Dataset | Myntra Fashion Products (Kaggle) | 44,419 products with images, categories, and attributes |
 
 ---
@@ -96,13 +101,23 @@ CLIP embeds text and images into the same 512-dimensional vector space. "Red run
 
 **Trade-off:** CLIP's text understanding is shallower than dedicated text embedding models (like OpenAI text-embedding-3-large). For pure text queries, a dedicated model would give 10-15% better retrieval accuracy. The mitigation: CLIP's image embeddings capture visual information (color, style, shape) that short product names miss, and the LLM can ask clarifying questions when results seem off.
 
-### Why OpenAI function calling instead of a framework (LangChain, Strands)
+### Why Strands Agents SDK instead of LangChain
 
-Three tools, one agent, one process. OpenAI's function calling handles tool routing natively — define tool schemas as JSON, GPT-4o decides which to call, we execute and feed results back. No framework abstraction needed.
+Strands is AWS's open-source agentic framework built specifically for Bedrock. It provides a `@tool` decorator pattern that maps directly to Bedrock's Converse API tool-calling format — no JSON schema definitions needed. The agent loop, tool routing, and structured output are handled by the framework.
 
-The tool functions are structured as standalone Python functions, so they can be wrapped with a `@tool` decorator (Strands) or exposed as MCP tools later without rewriting any logic.
+```python
+@tool
+def product_recommendation(query: str) -> list:
+    """Search products by text description."""
+    ...
 
-**Trade-off:** No built-in memory, guardrails, or observability. These are planned for the production version via AWS Bedrock (see Production Roadmap).
+agent = Agent(model=BedrockModel(...), tools=[product_recommendation])
+response = agent(query, structured_output_model=ProductDetails)
+```
+
+LangChain adds significant abstraction overhead for a three-tool agent. Strands is minimal, provider-agnostic (works with OpenAI, Bedrock, Anthropic), and the tool functions stay identical regardless of which model backend is used.
+
+**Trade-off:** Strands is newer and less battle-tested than LangChain. Documentation is thinner. Structured output occasionally requires validators to handle edge cases where the model returns `None` instead of an empty list.
 
 ### Why Postgres over MongoDB
 
@@ -151,13 +166,17 @@ The routing layer adds approx 50ms but saves roughly $3,000/month.
 - **Input validation:** Empty queries are rejected before reaching the agent.
 - **Prompt injection sanitization:** `sanitize_input()` strips control characters, enforces a 500-character length cap, and pattern-matches against injection trigger phrases (instruction overrides, persona hijacks, prompt exfiltration, template injection, HTML/JS injection) before any user input reaches the LLM. See [Input Sanitization](#input-sanitization) for details.
 - **Observability:** All LLM calls are traced end-to-end via Arize Phoenix — latency, token cost, input messages, and tool call arguments are captured automatically per request. See [Observability with Arize Phoenix](#observability-with-arize-phoenix) for details.
+- **Amazon Bedrock Guardrails:** A comprehensive safety layer applied to both inputs and outputs before they reach the agent or are returned to the user. Six enforcement mechanisms are configured:
+  1. **Content filters** — block harmful content across predefined categories (hate, violence, sexual, misconduct) and detect prompt injection attacks.
+  2. **Denied topics** — natural language definitions that semantically block off-topic requests such as order processing, payment handling, and transactional obligations outside the product catalog.
+  3. **Word filters** — exact match blocking for sensitive terms including PII-adjacent phrases (`credit card`, `CVV`, `social security`), off-topic requests (`place order`, `process refund`), and adversarial inputs (`jailbreak`, `prompt injection`, `ignore instructions`).
+  4. **Sensitive information filters** — PII detection that identifies and redacts personal data (phone numbers, addresses, card numbers) from both user inputs and model responses.
+  5. **Contextual grounding checks** — validate that model responses are grounded in retrieved product data and relevant to the user's query, reducing hallucination.
+  6. **Automated Reasoning checks** — custom policy enforcement ensuring responses comply with store-specific rules.
 
-### Planned for production (via AWS Bedrock Guardrails)
+  > **Note:** Well-crafted guardrails significantly improve the security posture of AI applications but do not guarantee complete protection. Prompt injection remains an active and evolving challenge — malicious inputs may still bypass safeguards in certain scenarios. In production, Bedrock Guardrails should always be combined with appropriate network and access controls as part of a broader, layered security strategy.
 
-- **Cost guardrails:** Per-request token cap (3,000 input + 1,000 output), per-user daily cap (15,000 tokens/day). If either cap is hit, return a downgraded response rather than failing silently.
-- **Content filtering:** PII detection and denied topic filtering. Bedrock Guardrails provides this as configuration, complementing the existing code-level injection sanitization.
-- **Retrieval quality:** Confidence threshold on similarity scores — if the top result's score is below 0.3, ask the user to refine their query rather than showing irrelevant products.
-- **LLM fallback chain:** GPT-4o failure triggers fallback to Claude Sonnet, then to a smaller model with a quality degradation warning.
+![Guardrails in action — harmful query blocked, agent responds with a scoped refusal](UI_images/guardrails.png)
 - **Extended observability:** Retrieval latency (P50/P95/P99), tool-call distribution, error rates, and per-user token budgets. CloudWatch dashboards with alerts on daily spend exceeding 120% of budget.
 
 ---
@@ -257,8 +276,10 @@ The sanitized string is what gets passed to `run_agent()` and, by extension, wha
 ### Prerequisites
 
 - Python 3.11+
-- PostgreSQL 16 with pgvector extension
-- OpenAI API key
+- PostgreSQL 16+ with pgvector extension (or AWS RDS with pgvector)
+- AWS account with Bedrock access (Claude Haiku 4.5 enabled in us-east-1)
+- AWS IAM user with `AmazonBedrockFullAccess` and `AmazonS3FullAccess`
+- Docker (for containerised deployment)
 
 ### Database setup
 
@@ -296,9 +317,23 @@ cp .env.example .env
 ### Environment variables (.env)
 
 ```
-OPENAI_API_KEY=sk-your-key-here
-DATABASE_URL=postgresql://postgres:localdev@localhost/myntradataset
+# AWS Bedrock
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_REGION=us-east-1
+BEDROCK_MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
+
+# Database (local)
 URL=host=localhost dbname=myntradataset user=postgres password=localdev
+
+# Database (AWS RDS)
+# URL=host=your-rds-endpoint.rds.amazonaws.com dbname=myntradataset user=postgres password=yourpassword sslmode=require
+
+# Flask
+FLASK_SECRET_KEY=your-secret-key
+
+# Observability (optional)
+PHOENIX_API_KEY=your-phoenix-key
 ```
 
 ### Ingest product catalog
@@ -349,14 +384,15 @@ palona_ai_agent/
 
 The current implementation uses OpenAI directly. The production version swaps the orchestration layer to AWS Bedrock while keeping the same tool functions, CLIP embeddings, and pgvector database.
 
-| Layer | Current (Demo) | Production Target |
+| Layer | Current (Deployed) | Production Target |
 |---|---|---|
-| LLM | GPT-4o (OpenAI API) | GPT-4o (20%) + small model (80%) via AWS Bedrock |
-| Agent framework | OpenAI function calling | Strands Agents SDK |
-| Guardrails | Code-level (input validation, error handling) | Bedrock Guardrails (content filtering, PII, grounding) |
+| LLM | Claude Haiku 4.5 (AWS Bedrock) | Claude Haiku (80%) + Claude Sonnet (20%) via Bedrock |
+| Agent framework | Strands Agents SDK | Same |
+| Guardrails | Bedrock Guardrails (all 6 mechanisms) + code-level sanitization | Same + automated policy tuning |
 | Memory | Stateless (per request) | Bedrock AgentCore Memory (short-term + long-term) |
-| Deployment | Local Flask | AWS Bedrock AgentCore Runtime (serverless) |
-| Vector search | pgvector | Same (or Pinecone at scale) |
+| Deployment | AWS ECS Fargate + ECR | AWS Bedrock AgentCore Runtime (serverless) |
+| Database | AWS RDS PostgreSQL + pgvector | Same (or Pinecone at scale) |
+| Images | AWS S3 | Same + CloudFront CDN |
 | Embedding | CLIP ViT-B/32 | Same |
 
 The migration is clean because the tool functions (`product_recommendation`, `image_product_search`) stay identical. Only the orchestration layer changes — who decides which tool to call.
@@ -371,8 +407,9 @@ The migration is clean because the tool functions (`product_recommendation`, `im
 | Vector store | pgvector (inside Postgres) | Product data + embeddings in one place, SQL filtering | Slower than FAISS at 10M+ vectors, fine at 44K |
 | Database | PostgreSQL | Relational product data, ACID guarantees, pgvector support | Less "flexible" than MongoDB, but flexibility is a liability for structured catalog data |
 | Embedding | CLIP ViT-B/32 | Must support both text and image in one embedding space | Weaker text retrieval vs dedicated text embedder (10-15% gap), mitigated by visual richness |
-| LLM (demo) | GPT-4o for all traffic | Simplicity, fast iteration | Cost uncontrolled at scale — production adds dual-model routing |
-| LLM (production) | GPT-4o (20%) + small model (80%) | Cost ceiling approx $1,500/month | 50ms routing overhead, slight quality reduction on simple queries |
-| Deployment (production) | Flask + AWS Bedrock | Managed memory, guardrails, multi-model access | AWS lock-in, mitigated by abstraction layer |
+| LLM | Claude Haiku 4.5 via Bedrock | Cost-efficient, strong tool-calling, native Bedrock integration | Slightly weaker vision than GPT-4o; production adds Sonnet for complex queries |
+| Agent framework | Strands Agents SDK | Provider-agnostic, minimal abstraction, native Bedrock tool-calling | Newer framework, thinner documentation than LangChain |
+| Guardrails | Amazon Bedrock Guardrails (all 6 mechanisms) | Managed safety layer, no custom ML needed | Does not guarantee complete prompt injection protection — layered with code-level sanitization |
+| Deployment | AWS ECS Fargate + ECR | Managed containers, no server provisioning, scales to zero | More complex than App Runner; chosen for fine-grained control over networking and memory |
 
 Every decision is constraint-driven. The architecture fits inside the constraints, not the other way around.
