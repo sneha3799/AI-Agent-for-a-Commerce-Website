@@ -19,8 +19,6 @@ An AI-powered shopping assistant that handles general conversation, text-based p
 9. [Observability with Arize Phoenix](#observability-with-arize-phoenix)
 10. [Input Sanitization](#input-sanitization)
 11. [Getting Started](#getting-started)
-12. [Production Roadmap](#production-roadmap)
-13. [Key Architectural Decisions Summary](#key-architectural-decisions-summary)
 
 ---
 
@@ -406,65 +404,3 @@ python app.py
 ```
 
 Visit `http://localhost:8000`.
-
-### Project structure
-
-```
-palona_ai_agent/
-├── app.py                 # Flask app setup + routes only
-├── agent/
-│   ├── __init__.py
-│   ├── orchestrator.py    # run_agent() + tool definitions
-│   └── tools.py           # product_recommendation(), image_product_search()
-├── retrieval/
-│   ├── __init__.py
-│   └── embedder.py        # generate_embeddings(), CLIP model loading
-├── guardrails/
-│   ├── __init__.py
-│   └── sanitizer.py       # sanitize_input(), injection patterns
-├── observability/
-│   ├── __init__.py
-│   └── traces.py       # tracer_provider, instrumentor initialization
-├── create_db.py           # Database ingestion script
-├── static/
-├── templates/
-├── .env.example
-├── pyproject.toml
-└── README.md
-```
-
----
-
-## Production Roadmap
-
-The current implementation uses OpenAI directly. The production version swaps the orchestration layer to AWS Bedrock while keeping the same tool functions, CLIP embeddings, and pgvector database.
-
-| Layer | Current (Deployed) | Production Target |
-|---|---|---|
-| LLM | Claude Haiku 4.5 (AWS Bedrock) | Claude Haiku (80%) + Claude Sonnet (20%) via Bedrock |
-| Agent framework | Strands Agents SDK | Same |
-| Guardrails | Bedrock Guardrails (all 6 mechanisms) + code-level sanitization | Same + automated policy tuning |
-| Memory | Stateless (per request) | Bedrock AgentCore Memory (short-term + long-term) |
-| Deployment | AWS ECS Fargate + ECR | AWS Bedrock AgentCore Runtime (serverless) |
-| Database | AWS RDS PostgreSQL + pgvector | Same (or Pinecone at scale) |
-| Images | AWS S3 | Same + CloudFront CDN |
-| Embedding | CLIP ViT-B/32 | Same |
-
-The migration is clean because the tool functions (`product_recommendation`, `image_product_search`) stay identical. Only the orchestration layer changes — who decides which tool to call.
-
----
-
-## Key Architectural Decisions Summary
-
-| Decision | Choice | Constraint | Trade-off |
-|---|---|---|---|
-| Agent pattern | Single agent with tool-calling | Latency budget — can't afford multi-agent orchestration | Losing modularity, gaining approx 300ms |
-| Vector store | pgvector (inside Postgres) | Product data + embeddings in one place, SQL filtering | Slower than FAISS at 10M+ vectors, fine at 44K |
-| Database | PostgreSQL | Relational product data, ACID guarantees, pgvector support | Less "flexible" than MongoDB, but flexibility is a liability for structured catalog data |
-| Embedding | CLIP ViT-B/32 | Must support both text and image in one embedding space | Weaker text retrieval vs dedicated text embedder (10-15% gap), mitigated by visual richness |
-| LLM | Claude Haiku 4.5 via Bedrock | Cost-efficient, strong tool-calling, native Bedrock integration | Slightly weaker vision than GPT-4o; production adds Sonnet for complex queries |
-| Agent framework | Strands Agents SDK | Provider-agnostic, minimal abstraction, native Bedrock tool-calling | Newer framework, thinner documentation than LangChain |
-| Guardrails | Amazon Bedrock Guardrails (all 6 mechanisms) | Managed safety layer, no custom ML needed | Does not guarantee complete prompt injection protection — layered with code-level sanitization |
-| Deployment | AWS ECS Fargate + ECR | Managed containers, no server provisioning, scales to zero | More complex than App Runner; chosen for fine-grained control over networking and memory |
-
-Every decision is constraint-driven. The architecture fits inside the constraints, not the other way around.
