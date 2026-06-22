@@ -282,6 +282,12 @@ A 30-example labeled dataset was built covering text product searches, ambiguous
 | `no-guardrails` | Guardrails removed entirely |
 | `tuned-guardrails` | Guardrails re-enabled with contextual grounding and relevance thresholds lowered, and content filters softened |
 
+![Phoenix experiments list for the commerce-agent-eval dataset, showing four runs: baseline-haiku, no-guardrails, and two tuned-guardrails iterations](UI_images/phoenix-experiments-list.png)
+
+![Phoenix experiments analysis chart and per-run metric table for category relevance, colour relevance, no_error, parameter quality, and routing accuracy](UI_images/phoenix-experiments-table.png)
+
+> Phoenix shows a fourth run (`#4 tuned-guardrails`) — a second guardrail-tuning pass made after the analysis below was written. Its scores (category relevance 0.46, colour relevance 0.75, parameter quality 0.56, routing accuracy 0.56) are *lower* than the `#3 tuned-guardrails` run analyzed in this section, suggesting that pass over-corrected the thresholds. The tables below reflect runs `#1`–`#3` only; `#4` is a flagged regression to investigate before relying on the current guardrail configuration.
+
 ### Result 1 — the original guardrail thresholds were suppressing correct tool-calling behavior
 
 | Condition | Tool-call accuracy (21 product queries) |
