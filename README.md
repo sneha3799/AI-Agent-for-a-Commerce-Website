@@ -287,8 +287,6 @@ A 30-example labeled dataset was built covering text product searches, ambiguous
 
 ![Phoenix experiments analysis chart and per-run metric table for category relevance, colour relevance, no_error, parameter quality, and routing accuracy](UI_images/phoenix-experiments-table.png)
 
-> **Note:** The `tuned-guardrails` numbers below reflect the latest re-tune, which regressed from an earlier tuning pass that had reached 100% tool-call accuracy. The current configuration over-corrected the contextual grounding and relevance thresholds and is now suppressing tool calls again, just less severely than the untuned baseline. This configuration needs another pass before it should be considered production-ready.
-
 ### Result 1 — the current tuned-guardrails configuration only partially recovers tool-calling
 
 | Condition | Tool-call accuracy (21 product queries) |
