@@ -270,6 +270,55 @@ if error:
 The sanitized string is what gets passed to `run_agent()` and, by extension, what appears in Phoenix traces — so traces always reflect the cleaned input, not raw user content.
 
 ---
+## Evaluations
+
+A 30-example labeled dataset was built covering text product searches, ambiguous queries, general chat, and greeting/closing turns. Each example carries an `expected_tool` label and, where applicable, `expected_colours` / `expected_categories` for grading. The dataset was run through three conditions using [Arize Phoenix](https://phoenix.arize.com) experiments with LLM-as-judge annotators for `routing_accuracy`, `category_relevance`, `colour_relevance`, `parameter_quality`, and `no_error`. The model, system prompt, and code were held constant across all three runs — **only the guardrail configuration changed.**
+
+### Conditions tested
+
+| Condition | Guardrail configuration |
+|---|---|
+| `baseline-haiku` | Original guardrails (default thresholds for contextual grounding, relevance, and content filters) |
+| `no-guardrails` | Guardrails removed entirely |
+| `tuned-guardrails` | Guardrails re-enabled with contextual grounding and relevance thresholds lowered, and content filters softened |
+
+### Result 1 — the original guardrail thresholds were suppressing correct tool-calling behavior
+
+| Condition | Tool-call accuracy (21 product queries) |
+|---|---|
+| `baseline-haiku` | **14.3%** (3/21 correct) |
+| `no-guardrails` | **100%** (21/21 correct) |
+| `tuned-guardrails` | **100%** (21/21 correct) |
+
+With the original guardrail thresholds in place, the agent failed to invoke `product_recommendation` on 18 of 21 product queries ("white sneakers," "leather wallet," "navy blue polo shirt," etc.), returning generic or ungrounded text instead of querying the real catalog. Removing guardrails entirely fixed this completely, and re-tuning the guardrails (lower grounding/relevance thresholds, softer content filters) recovered the same 100% accuracy — meaning the strict default thresholds, not the model or the prompt, were the cause of the failure.
+
+This points to the contextual grounding and relevance checks as the most likely mechanism: at their default thresholds, they may have been classifying legitimate tool-call responses as insufficiently grounded or relevant and intervening before the tool result reached the user. This wasn't isolated further in this round of testing — a follow-up experiment toggling each guardrail mechanism independently would confirm exactly which one was responsible.
+
+### Result 2 — tuned guardrails matched no-guardrails on every quality metric
+
+| Metric | `no-guardrails` | `tuned-guardrails` | Δ |
+|---|---|---|---|
+| Routing accuracy | 1.00 | 1.00 | 0 |
+| Category relevance | 0.733 | 0.733 | 0 |
+| Colour relevance | 0.953 | 0.953 | 0 |
+| Parameter quality | 1.00 | 1.00 | 0 |
+| Avg latency | 8675 ms | 8698 ms | +23 ms (noise) |
+
+Once thresholds were loosened, the guardrail layer produced **identical** quality scores to having no guardrails at all, with a latency difference small enough to be measurement noise. This is the evidence behind the claim in [Failure Modes and Guardrails](#failure-modes-and-guardrails) that the tuned guardrail configuration doesn't degrade the experience for legitimate shoppers.
+
+### Result 3 — baseline's low latency was a symptom of the failure, not a benefit
+
+| Condition | Avg latency | Median | p95 |
+|---|---|---|---|
+| `baseline-haiku` | 1523 ms | 645 ms | 5474 ms |
+| `no-guardrails` | 8675 ms | 9402 ms | 15904 ms |
+| `tuned-guardrails` | 8698 ms | 8322 ms | 14926 ms |
+
+`baseline-haiku`'s lower latency is not a performance win — it reflects the agent skipping the tool call and database round-trip entirely on most product queries, returning a faster but wrong (hallucinated) response. The two correctly-functioning conditions both incur the real cost of a tool call: CLIP embedding, a pgvector similarity search against 44K rows, and a second model pass to format the structured response. This is the latency baseline to plan around for production, not the artificially fast baseline number.
+
+### Known gap in this evaluation
+
+This 30-example set contains **no adversarial or harmful queries** — all examples are benign shopping or chit-chat. None of the three conditions had a chance to demonstrate actual guardrail *blocking* behavior in this run; the comparison only shows that tuned guardrails don't cost anything in quality or latency relative to no guardrails. The manual tests in [Failure Modes and Guardrails](#failure-modes-and-guardrails) (e.g. the bomb-making query) cover blocking qualitatively, but a future iteration should fold adversarial examples into this same labeled dataset so blocking rate and false-positive rate on benign queries can be measured side by side, quantitatively, in one experiment.
 
 ## Getting Started
 

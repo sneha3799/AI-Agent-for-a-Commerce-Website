@@ -7,6 +7,15 @@ load_dotenv()
 
 from retrieval.embedder import generate_embeddings
 
+_last_tool_call = {"name": None, "params": None}
+
+def get_last_tool_call():
+    return _last_tool_call.copy()
+
+def reset_tool_call():
+    _last_tool_call["name"] = None
+    _last_tool_call["params"] = None
+
 def get_connection():
     """Fresh connection per call — avoids closed cursor issues"""
     return psycopg2.connect(os.getenv('URL'))
@@ -38,6 +47,8 @@ def rows_to_dicts(rows: list) -> list:
 @tool
 def product_recommendation(query: str) -> list:
     """Search products by text description. Use when the user asks for product recommendations."""
+    _last_tool_call["name"] = "product_recommendation"
+    _last_tool_call["params"] = {"query": query}
     print(f"🔧 TOOL CALLED with: {query}")
     embedding = generate_embeddings(query, is_image=False)
     
@@ -59,6 +70,8 @@ def product_recommendation(query: str) -> list:
 @tool
 def image_product_search(image):
     """Search for similar products using an image. Use when the user uploads an image."""
+    _last_tool_call["name"] = "image_product_search"
+    _last_tool_call["params"] = {"image": str(image)[:100]}
     embedding = generate_embeddings(image)
     
     try:

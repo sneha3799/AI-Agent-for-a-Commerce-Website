@@ -27,3 +27,5 @@ requests==2.31.0
 arize-phoenix-otel
 openinference-instrumentation-openai
 opentelemetry-instrumentation-threading
+arize-phoenix-evals
+arize-phoenix-client

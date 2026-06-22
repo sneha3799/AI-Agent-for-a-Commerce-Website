@@ -6,7 +6,7 @@ import imghdr
 
 from strands import Agent
 from strands.models import BedrockModel
-from agent.tools import product_recommendation, image_product_search
+from agent.tools import product_recommendation, image_product_search, get_last_tool_call, reset_tool_call
 
 from pydantic import BaseModel, Field, field_validator
 from typing import List
@@ -78,21 +78,35 @@ def run_agent(query, image_path=None):
             structured_output_model=ProductDetails
         )
 
+    # Get tool call metadata captured during execution
+    tool_call_info = get_last_tool_call()
+    tool_name = tool_call_info["name"]
+    tool_params = tool_call_info["params"]
+    num_turns = 2 if tool_name else 1
+    reset_tool_call()  # clear for next request
+
     # Check if guardrail blocked the response
     guardrail_action = getattr(response, 'stop_reason', None)
     if guardrail_action == 'guardrail_intervened':
         return {
             "text": "I'm sorry, I'm only able to help with fashion product searches and general questions about our store.",
-            "products": []
+            "products": [],
+            "tool_name": None,
+            "tool_params": None,
+            "num_turns": 1,
         }
 
     output = response.structured_output
     if output is None:
         return {
             "text": "I'm sorry, I can't help with that request.",
-            "products": []
+            "products": [],
+            "tool_name": None,
+            "tool_params": None,
+            "num_turns": 1,
+
         }
-    
+
     # response type <class 'strands.agent.agent_result.AgentResult'>
     # structured output type <class 'agent.strands_agent.ProductDetails'>
     return {
@@ -107,5 +121,8 @@ def run_agent(query, image_path=None):
                 "colour": p.get("base_colour")
             }
             for p in (response.structured_output.products or [])
-        ]
+        ],
+        "tool_name": tool_name,
+        "tool_params": tool_params,
+        "num_turns": num_turns,
     }
