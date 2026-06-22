@@ -270,6 +270,7 @@ if error:
 The sanitized string is what gets passed to `run_agent()` and, by extension, what appears in Phoenix traces — so traces always reflect the cleaned input, not raw user content.
 
 ---
+
 ## Evaluations
 
 A 30-example labeled dataset was built covering text product searches, ambiguous queries, general chat, and greeting/closing turns. Each example carries an `expected_tool` label and, where applicable, `expected_colours` / `expected_categories` for grading. The dataset was run through three conditions using [Arize Phoenix](https://phoenix.arize.com) experiments with LLM-as-judge annotators for `routing_accuracy`, `category_relevance`, `colour_relevance`, `parameter_quality`, and `no_error`. The model, system prompt, and code were held constant across all three runs — **only the guardrail configuration changed.**
@@ -278,53 +279,119 @@ A 30-example labeled dataset was built covering text product searches, ambiguous
 
 | Condition | Guardrail configuration |
 |---|---|
-| `baseline-haiku` | Original guardrails (default thresholds for contextual grounding, relevance, and content filters) |
+| `baseline` | Original guardrails (default thresholds for contextual grounding, relevance, and content filters) |
 | `no-guardrails` | Guardrails removed entirely |
 | `tuned-guardrails` | Guardrails re-enabled with contextual grounding and relevance thresholds lowered, and content filters softened |
 
-![Phoenix experiments list for the commerce-agent-eval dataset, showing four runs: baseline-haiku, no-guardrails, and two tuned-guardrails iterations](UI_images/phoenix-experiments-list.png)
+![Phoenix experiments list for the commerce-agent-eval dataset, showing three runs: baseline, no-guardrails, and tuned-guardrails](UI_images/phoenix-experiments-list.png)
 
 ![Phoenix experiments analysis chart and per-run metric table for category relevance, colour relevance, no_error, parameter quality, and routing accuracy](UI_images/phoenix-experiments-table.png)
 
-> Phoenix shows a fourth run (`#4 tuned-guardrails`) — a second guardrail-tuning pass made after the analysis below was written. Its scores (category relevance 0.46, colour relevance 0.75, parameter quality 0.56, routing accuracy 0.56) are *lower* than the `#3 tuned-guardrails` run analyzed in this section, suggesting that pass over-corrected the thresholds. The tables below reflect runs `#1`–`#3` only; `#4` is a flagged regression to investigate before relying on the current guardrail configuration.
+<!-- Evaluation summary charts -->
+<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 1.5rem;">
+  <div style="background: #f6f8fa; border-radius: 8px; padding: 1rem;">
+    <p style="font-size: 13px; color: #57606a; margin: 0 0 4px;">Baseline (weak prompt)</p>
+    <p style="font-size: 24px; font-weight: 500; margin: 0; color: #cf222e;">14.3%</p>
+    <p style="font-size: 12px; color: #57606a; margin: 4px 0 0;">tool-call accuracy</p>
+  </div>
+  <div style="background: #f6f8fa; border-radius: 8px; padding: 1rem;">
+    <p style="font-size: 13px; color: #57606a; margin: 0 0 4px;">No guardrails (fixed prompt)</p>
+    <p style="font-size: 24px; font-weight: 500; margin: 0; color: #1a7f37;">100%</p>
+    <p style="font-size: 12px; color: #57606a; margin: 4px 0 0;">tool-call accuracy</p>
+  </div>
+  <div style="background: #f6f8fa; border-radius: 8px; padding: 1rem;">
+    <p style="font-size: 13px; color: #57606a; margin: 0 0 4px;">Tuned guardrails</p>
+    <p style="font-size: 24px; font-weight: 500; margin: 0; color: #9a6700;">38.1%</p>
+    <p style="font-size: 12px; color: #57606a; margin: 4px 0 0;">tool-call accuracy</p>
+  </div>
+</div>
 
-### Result 1 — the original guardrail thresholds were suppressing correct tool-calling behavior
+<div style="position: relative; width: 100%; height: 280px; margin-bottom: 1.5rem;">
+  <canvas id="qualityChart" role="img" aria-label="Bar chart comparing routing accuracy, category relevance, colour relevance, and parameter quality across three conditions: baseline, no guardrails, and tuned guardrails">Baseline scores 0.4, 0.37, 0.66, 0.4 on routing accuracy, category relevance, colour relevance, parameter quality respectively. No guardrails scores 1.0, 0.73, 0.95, 1.0. Tuned guardrails scores 0.567, 0.467, 0.753, 0.567 on the same metrics.</canvas>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 8px; font-size: 12px; color: #57606a;">
+  <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 10px; height: 10px; border-radius: 2px; background: #E24B4A; display: inline-block;"></span>Baseline (weak prompt)</span>
+  <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 10px; height: 10px; border-radius: 2px; background: #888780; display: inline-block;"></span>No guardrails</span>
+  <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 10px; height: 10px; border-radius: 2px; background: #1D9E75; display: inline-block;"></span>Tuned guardrails</span>
+</div>
+
+<div style="position: relative; width: 100%; height: 220px; margin-top: 1.5rem;">
+  <canvas id="latencyChart" role="img" aria-label="Bar chart comparing average latency in milliseconds across three conditions">Baseline averages 1523ms, no guardrails averages 8675ms, tuned guardrails averages 2675ms.</canvas>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+new Chart(document.getElementById('qualityChart'), {
+  type: 'bar',
+  data: {
+    labels: ['Routing accuracy', 'Category relevance', 'Colour relevance', 'Parameter quality'],
+    datasets: [
+      { label: 'Baseline', data: [0.4, 0.367, 0.66, 0.4], backgroundColor: '#E24B4A' },
+      { label: 'No guardrails', data: [1.0, 0.733, 0.953, 1.0], backgroundColor: '#888780' },
+      { label: 'Tuned guardrails', data: [0.567, 0.467, 0.753, 0.567], backgroundColor: '#1D9E75' }
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { y: { min: 0, max: 1, ticks: { callback: (v) => (v*100).toFixed(0)+'%' } } }
+  }
+});
+new Chart(document.getElementById('latencyChart'), {
+  type: 'bar',
+  data: {
+    labels: ['Baseline', 'No guardrails', 'Tuned guardrails'],
+    datasets: [{ data: [1523, 8675, 2675], backgroundColor: ['#E24B4A', '#888780', '#1D9E75'] }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { y: { title: { display: true, text: 'Avg latency (ms)' } } }
+  }
+});
+</script>
+
+> **Note:** The `tuned-guardrails` numbers below reflect the latest re-tune, which regressed from an earlier tuning pass that had reached 100% tool-call accuracy. The current configuration over-corrected the contextual grounding and relevance thresholds and is now suppressing tool calls again, just less severely than the untuned baseline. This configuration needs another pass before it should be considered production-ready.
+
+### Result 1 — the current tuned-guardrails configuration only partially recovers tool-calling
 
 | Condition | Tool-call accuracy (21 product queries) |
 |---|---|
-| `baseline-haiku` | **14.3%** (3/21 correct) |
+| `baseline` | **14.3%** (3/21 correct) |
 | `no-guardrails` | **100%** (21/21 correct) |
-| `tuned-guardrails` | **100%** (21/21 correct) |
+| `tuned-guardrails` | **38.1%** (8/21 correct) |
 
-With the original guardrail thresholds in place, the agent failed to invoke `product_recommendation` on 18 of 21 product queries ("white sneakers," "leather wallet," "navy blue polo shirt," etc.), returning generic or ungrounded text instead of querying the real catalog. Removing guardrails entirely fixed this completely, and re-tuning the guardrails (lower grounding/relevance thresholds, softer content filters) recovered the same 100% accuracy — meaning the strict default thresholds, not the model or the prompt, were the cause of the failure.
+With the original guardrail thresholds in place, the agent failed to invoke `product_recommendation` on 18 of 21 product queries ("white sneakers," "leather wallet," "navy blue polo shirt," etc.), returning generic or ungrounded text instead of querying the real catalog. Removing guardrails entirely fixed this completely (100%). The most recent guardrail re-tune was meant to recover that same accuracy with the safety layer back in place, but it currently only reaches 38.1% — better than the untuned baseline, but still missing the tool call on 13 of 21 product queries, including "warm jacket for winter," "red running shoes," and "sandals for women."
 
-This points to the contextual grounding and relevance checks as the most likely mechanism: at their default thresholds, they may have been classifying legitimate tool-call responses as insufficiently grounded or relevant and intervening before the tool result reached the user. This wasn't isolated further in this round of testing — a follow-up experiment toggling each guardrail mechanism independently would confirm exactly which one was responsible.
+This confirms that contextual grounding and relevance thresholds are the most likely mechanism interfering with tool-call delivery, but shows that "tuned" is not a one-time fix — these thresholds need re-validation against this test set every time they're adjusted.
 
-### Result 2 — tuned guardrails matched no-guardrails on every quality metric
+### Result 2 — the current tuned-guardrails configuration does not match no-guardrails on quality
 
-| Metric | `no-guardrails` | `tuned-guardrails` | Δ |
+| Metric | `baseline` | `no-guardrails` | `tuned-guardrails` | Δ (tuned vs no-guardrails) |
+|---|---|---|---|---|
+| Routing accuracy | 0.400 | 1.000 | 0.567 | −0.433 |
+| Category relevance | 0.367 | 0.733 | 0.467 | −0.266 |
+| Colour relevance | 0.660 | 0.953 | 0.753 | −0.200 |
+| Parameter quality | 0.400 | 1.000 | 0.567 | −0.433 |
+
+Every quality metric dropped meaningfully from `no-guardrails` to `tuned-guardrails`. This configuration should not be treated as validated until it's re-tuned and re-run against this dataset.
+
+### Result 3 — baseline's low latency was (and still partly is) a symptom of failure, not a benefit
+
+| Condition | Avg latency | Median | P95 |
 |---|---|---|---|
-| Routing accuracy | 1.00 | 1.00 | 0 |
-| Category relevance | 0.733 | 0.733 | 0 |
-| Colour relevance | 0.953 | 0.953 | 0 |
-| Parameter quality | 1.00 | 1.00 | 0 |
-| Avg latency | 8675 ms | 8698 ms | +23 ms (noise) |
+| `baseline` | 1523 ms | 645 ms | 6193 ms |
+| `no-guardrails` | 8675 ms | 9402 ms | 17254 ms |
+| `tuned-guardrails` | 2675 ms | 824 ms | 8238 ms |
 
-Once thresholds were loosened, the guardrail layer produced **identical** quality scores to having no guardrails at all, with a latency difference small enough to be measurement noise. This is the evidence behind the claim in [Failure Modes and Guardrails](#failure-modes-and-guardrails) that the tuned guardrail configuration doesn't degrade the experience for legitimate shoppers.
-
-### Result 3 — baseline's low latency was a symptom of the failure, not a benefit
-
-| Condition | Avg latency | Median | p95 |
-|---|---|---|---|
-| `baseline-haiku` | 1523 ms | 645 ms | 5474 ms |
-| `no-guardrails` | 8675 ms | 9402 ms | 15904 ms |
-| `tuned-guardrails` | 8698 ms | 8322 ms | 14926 ms |
-
-`baseline-haiku`'s lower latency is not a performance win — it reflects the agent skipping the tool call and database round-trip entirely on most product queries, returning a faster but wrong (hallucinated) response. The two correctly-functioning conditions both incur the real cost of a tool call: CLIP embedding, a pgvector similarity search against 44K rows, and a second model pass to format the structured response. This is the latency baseline to plan around for production, not the artificially fast baseline number.
+`baseline`'s low latency reflects the agent skipping the tool call and database round-trip entirely on most product queries, returning a faster but wrong (hallucinated) response. The current `tuned-guardrails` run sits between the two extremes for the same reason — its latency is lower than `no-guardrails` mainly because it's also skipping more tool calls than it should (13 of 21), not because it's meaningfully faster at the same task. The properly-functioning `no-guardrails` condition is the real latency baseline to plan around for production: CLIP embedding, a pgvector similarity search against 44K rows, and a second model pass to format the structured response.
 
 ### Known gap in this evaluation
 
-This 30-example set contains **no adversarial or harmful queries** — all examples are benign shopping or chit-chat. None of the three conditions had a chance to demonstrate actual guardrail *blocking* behavior in this run; the comparison only shows that tuned guardrails don't cost anything in quality or latency relative to no guardrails. The manual tests in [Failure Modes and Guardrails](#failure-modes-and-guardrails) (e.g. the bomb-making query) cover blocking qualitatively, but a future iteration should fold adversarial examples into this same labeled dataset so blocking rate and false-positive rate on benign queries can be measured side by side, quantitatively, in one experiment.
+This 30-example set contains **no adversarial or harmful queries** — all examples are benign shopping or chit-chat. None of the three conditions had a chance to demonstrate actual guardrail *blocking* behavior in this run; the comparison only measures tool-calling reliability and quality on legitimate traffic. The manual tests in [Failure Modes and Guardrails](#failure-modes-and-guardrails) (e.g. the bomb-making query) cover blocking qualitatively, but a future iteration should fold adversarial examples into this same labeled dataset so blocking rate and false-positive rate on benign queries can be measured side by side, quantitatively, in one experiment — and the guardrail thresholds should be re-tuned and re-validated against this dataset before that happens, given the regression documented above.
+
+---
 
 ## Getting Started
 
